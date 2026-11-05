@@ -1,0 +1,32 @@
+<Window x:Class="TermoDom.Studio.StudioWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Style="{StaticResource {x:Type Window}}" Title="TermoDom Studio" Width="1360" Height="900" MinWidth="1050" MinHeight="700" WindowStartupLocation="CenterScreen">
+ <Grid Margin="16"><Grid.RowDefinitions><RowDefinition Height="66"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <StackPanel><TextBlock Text="TERMODOM  /  STUDIO" FontSize="21" FontWeight="SemiBold"/><TextBlock x:Name="Connection" Text="Priprema izoliranog Codexa…" Foreground="#8CABA9" Margin="0,6,0,0"/></StackPanel>
+   <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Login" Content="Prijavi se kroz ChatGPT" Click="Login_Click"/><Button x:Name="Logout" Content="Odjava" Click="Logout_Click"/></StackPanel>
+  </Grid>
+  <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="430"/></Grid.ColumnDefinitions>
+   <Border Background="#15222D" CornerRadius="12" Padding="10"><DockPanel>
+    <StackPanel DockPanel.Dock="Top"><TextBlock Text="SAMO OVAJ PROJEKT" Foreground="#69D8C0" FontSize="11" Margin="7,8"/><TextBlock Text="TermoDom" FontSize="20" Margin="7,2,7,16"/>
+     <Button Content="＋ Novi razgovor" Click="New_Click"/><Button Content="Osvježi projekt" Click="Refresh_Click"/>
+    </StackPanel>
+    <TabControl Margin="0,12,0,0"><TabItem Header="Datoteke"><DockPanel><TextBox x:Name="Search" DockPanel.Dock="Top" ToolTip="Pretraži nazive datoteka" TextChanged="Search_Changed"/><ListBox x:Name="Files" SelectionChanged="Files_Selected" FontFamily="Consolas" FontSize="11"/></DockPanel></TabItem><TabItem Header="Chatovi"><ListBox x:Name="Threads" SelectionChanged="Threads_Selected" DisplayMemberPath="Label"/></TabItem></TabControl>
+   </DockPanel></Border>
+   <Grid Grid.Column="2"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <Border Background="#15222D" CornerRadius="12" Padding="14"><DockPanel><TextBlock DockPanel.Dock="Top" Text="Razgovor i rad agenta" FontSize="17" Margin="0,0,0,12"/><ScrollViewer x:Name="ChatScroll" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Chat"/></ScrollViewer></DockPanel></Border>
+    <Border Grid.Row="1" Background="#15222D" CornerRadius="12" Padding="12" Margin="0,12,0,0"><StackPanel>
+     <WrapPanel><StackPanel><TextBlock Text="Model" Foreground="#91ACBA" Margin="5,0"/><ComboBox x:Name="Models" Width="170" DisplayMemberPath="Label" SelectionChanged="Model_Changed"/></StackPanel><StackPanel><TextBlock Text="Razmišljanje" Foreground="#91ACBA" Margin="5,0"/><ComboBox x:Name="Effort" Width="115"/></StackPanel><StackPanel><TextBlock Text="Brzina" Foreground="#91ACBA" Margin="5,0"/><ComboBox x:Name="Speed" Width="125" DisplayMemberPath="Label"/></StackPanel></WrapPanel>
+     <ComboBox x:Name="Access" ToolTip="Oba načina rade samo unutar Windows Sandboxa. Standardni način dopušta da agent zatraži odobrenje; nije potvrda svake naredbe."><ComboBoxItem Content="Standardno • potvrde na zahtjev" IsSelected="True"/><ComboBoxItem Content="Full access • unutar Sandboxa"/></ComboBox>
+     <TextBox x:Name="Prompt" AcceptsReturn="True" TextWrapping="Wrap" Height="92" VerticalScrollBarVisibility="Auto" Margin="4,8,4,4" ToolTip="Zadatak za TermoDom. Ctrl+Enter šalje poruku." KeyDown="Prompt_KeyDown"/>
+     <DockPanel><Button x:Name="Send" Content="Pošalji zadatak  ↗" Click="Send_Click" Background="#257B70"/><Button x:Name="Stop" Content="Zaustavi" Click="Stop_Click"/><TextBlock Text="Ctrl+Enter" Foreground="#91ACBA" VerticalAlignment="Center" Margin="8,0"/></DockPanel>
+    </StackPanel></Border>
+   </Grid>
+   <Border Grid.Column="4" CornerRadius="12" Background="#15222D" Padding="9"><TabControl>
+    <TabItem Header="Uređivač"><DockPanel><StackPanel DockPanel.Dock="Top"><TextBlock x:Name="EditorName" Text="Odaberi datoteku projekta" TextTrimming="CharacterEllipsis" Margin="5,10"/><WrapPanel><Button Content="Spremi" Click="Save_Click"/><Button Content="Učitaj s diska" Click="Reload_Click"/></WrapPanel></StackPanel><TextBox x:Name="Editor" AcceptsReturn="True" AcceptsTab="True" FontFamily="Consolas" FontSize="12" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" TextChanged="Editor_Changed"/></DockPanel></TabItem>
+    <TabItem Header="Git"><DockPanel><WrapPanel DockPanel.Dock="Top"><Button Content="Status i diff" Click="Git_Click"/><Button Content="Spremi commit" Click="Commit_Click"/></WrapPanel><TextBox x:Name="Diff" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas" FontSize="11" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/></DockPanel></TabItem>
+    <TabItem Header="Terminal"><DockPanel><StackPanel DockPanel.Dock="Bottom"><TextBox x:Name="Command" AcceptsReturn="False" ToolTip="PowerShell naredba unutar Sandboxa"/><WrapPanel><Button Content="Pokreni" Click="Command_Click"/><Button Content="Zaustavi proces" Click="KillCommand_Click"/><Button Content="Windows testovi" Click="Test_Click"/><Button Content="Pripremi .NET SDK" Click="Tools_Click"/></WrapPanel></StackPanel><TextBox x:Name="Terminal" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" FontSize="11" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/></DockPanel></TabItem>
+    <TabItem Header="Kontekst"><ScrollViewer VerticalScrollBarVisibility="Auto"><TextBlock x:Name="Context" TextWrapping="Wrap" Margin="10" Foreground="#C3D8DF"/></ScrollViewer></TabItem>
+   </TabControl></Border>
+  </Grid>
+  <TextBlock Grid.Row="2" x:Name="Status" Text="Projekt i razgovori ostaju u zasebnim podacima Studija." TextWrapping="Wrap" FontSize="11" Foreground="#92ABB8" Margin="5,12,5,0"/>
+ </Grid>
+</Window>
