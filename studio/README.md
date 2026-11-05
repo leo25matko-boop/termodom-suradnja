@@ -13,6 +13,10 @@ Ovo je osobni lokalni klijent; nije usluga koja dijeli vlasnikov račun zaposlen
    Potrebni su Windows Pro/Enterprise/Education i hardverska virtualizacija.
 3. Odaberi **Otvori izolirani Studio**. Otvara se zaseban Microsoft Windows Sandbox
    prozor u kojem radi nativna aplikacija. Taj vanjski prozor je vidljiv dio izolacije.
+   Na ovom vlasnikovu računalu privatni izvoz razgovora je već pripremljen. Na drugom
+   osobnom računalu prije otvaranja odaberi **Uvezi privatnu kopiju ovog razgovora**
+   i zasebno privatno preneseni JSON. Nikad ga ne objavljuj na GitHubu. Uvoz odbija
+   prepisivanje već započetog razgovora, pa se postojeći rad neće zamijeniti.
 4. **Prijavi se kroz ChatGPT** otvara službenu OpenAI prijavu u pregledniku unutar
    Sandboxa. Ondje možeš odabrati svoj Google račun. Ne unosi lozinku ili kod u chat.
    Ovdje postoji nova odvojena prijava; postojeća sesija iz host Codexa se ne kopira.
@@ -20,7 +24,14 @@ Ovo je osobni lokalni klijent; nije usluga koja dijeli vlasnikov račun zaposlen
    dostupnost, ograničenja i potrošnja ovise o računu. Fast nije zajamčen za svaki
    model i može trošiti više limita. Nema zasebnog API ključa.
 6. Upiši zadatak, Ctrl+Enter. Agent uređuje projekt i pokreće razvojne naredbe.
-   Nove razgovore Studio čuva u svojoj indeksnoj datoteci i zasebnom CODEX_HOME.
+   Studio nastavlja samo ovaj preneseni razgovor. Nema gumba za novi razgovor,
+   popisa drugih razgovora ni promjene projekta. Pri ponovnom otvaranju automatski
+   nastavlja istu vlastitu Codex povijest. Bez privatnog uvoza ili spremljenog
+   projektnog razgovora neće stvarati prazni zamjenski chat.
+   Plus dodaje slike ili datoteke unutar projekta. Model, razmišljanje, brzina i
+   dozvole su u donjem polju poruke. **Promjene / terminal** otvara bočni pregled
+   uređivača, stvarnog Gita, naredbi i konteksta. Osnovno sučelje je mirno,
+   monokromatsko, sa središnjim razgovorom i rasporedom po uzoru na Codex.
 7. Za Windows razvoj jednom odaberi **Terminal → Pripremi .NET SDK**. Preuzima
    službeni Microsoft SDK (285 MB), provjerava SHA512 i raspakira ga u podatke
    Sandboxa. Zatim **Windows testovi**, ili `./scripts/team/Dev.ps1 -Action Run`.

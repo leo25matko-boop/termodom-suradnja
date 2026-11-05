@@ -9,8 +9,8 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 namespace TermoDom.Studio;
-public sealed record ModelChoice(string Id,string Label,string DefaultEffort,List<string> Efforts,List<SpeedChoice> Speeds);
-public sealed record SpeedChoice(string Id,string Label);
+public sealed record ModelChoice(string Id,string Label,string DefaultEffort,List<string> Efforts,List<SpeedChoice> Speeds){public override string ToString()=>Label;}
+public sealed record SpeedChoice(string Id,string Label){public override string ToString()=>Label;}
 public sealed record ChatEntry(string Role,string Text);
 public sealed class StudioThread
 {
@@ -23,7 +23,8 @@ public partial class StudioWindow : Window
  Workspace? workspace;StudioThread? current;List<StudioThread> threads=[];ConversationImport? privateImport;
  readonly Dictionary<string,TextBlock> liveMessages=[];
  readonly HashSet<string> announced=[];
- string? currentTurn,editorPath,editorHash;bool editorDirty,loadingEditor,busy,authenticated;
+ string? currentTurn,editorPath,editorHash;bool editorDirty,loadingEditor,busy,authenticated,engineReady;
+ readonly List<string> attachments=[];
  CancellationTokenSource? commandLifetime;
  string IndexPath=>Path.Combine(Isolation.Data,"studio-chats.json");
  public StudioWindow(bool preview)
@@ -58,6 +59,8 @@ public partial class StudioWindow : Window
     sessionLock=new FileStream(Path.Combine(Isolation.Data,"studio-worker.lock"),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
     workspace=new Workspace(Isolation.Project);
     if(File.Exists(IndexPath))threads=JsonSerializer.Deserialize<List<StudioThread>>(File.ReadAllText(IndexPath))??[];
+    if(threads.Count>1)throw new IOException("Studio je ograničen na jedan razgovor. Višestruka povijest se ne otvara automatski.");
+    current=threads.SingleOrDefault();
     var importPath=Path.Combine(Isolation.Data,"Imports","current-chat.json");
     if(File.Exists(importPath))
     {
@@ -66,21 +69,28 @@ public partial class StudioWindow : Window
      {
       current=new StudioThread{Label=privateImport.Title,ImportPending=true,Messages=privateImport.DisplayMessages().Select(m=>new ChatEntry(m.Role,m.Text)).ToList()};threads.Add(current);SaveThreads();
      }
-     else current=threads.FirstOrDefault(t=>t.ImportPending);
     }
-    BindThreads();
+    if(current==null)throw new IOException("Za nastavak nedostaje privatni izvoz ovog razgovora. Studio neće stvarati zamjenski razgovor.");
+    UpdateConversationTitle();
     var exe=Path.Combine(Isolation.AppRoot,"Tools","codex","vendor","x86_64-pc-windows-msvc","bin","codex.exe");
     await rpc.StartAsync(exe,Isolation.Project,Path.Combine(Isolation.Data,"Codex"));
+    engineReady=true;
     await RefreshAccountAsync();
-    if(current!=null){foreach(var message in current.Messages)AddMessage(message.Role,message.Text,false);AddMessage("STUDIO","Prenesen je vidljivi sadržaj ovog projektnog razgovora. Prvi sljedeći zadatak nastavlja s tim porukama i priloženim slikama. Izvorni Codex chat se ne sinkronizira automatski.",false);}
-    else AddMessage("STUDIO","Nastavljamo TermoDom. Projektni kontekst je prenesen iz pregledanog izvora. Drugi privatni ChatGPT/Codex razgovori nisu uvezeni. Zadaj što želiš promijeniti.",false);
+    if(current.Id.Length>0)await rpc.CallAsync("thread/resume",new{threadId=current.Id,cwd=Isolation.Project,excludeTurns=true,sandbox="danger-full-access",approvalPolicy=Access.SelectedIndex==1?"never":"on-request"});
+    for(var i=0;i<current.Messages.Count;i++)
+    {
+     var message=current.Messages[i];var block=AddMessage(message.Role,message.Text,false);
+     if(privateImport!=null&&i<privateImport.Messages.Count)RenderImportedImages(privateImport.Messages[i],(StackPanel)block.Parent);
+    }
+    if(current.ImportPending)AddMessage("STUDIO","Prenesen je sadržaj ovog razgovora. Sljedeći zadatak nastavlja s tim porukama i priloženim slikama. Izvorni Codex chat se ne sinkronizira automatski.",false);
    }
    RefreshFiles();LoadContext();UpdateActions();
    if(preview&&Environment.GetCommandLineArgs().FirstOrDefault(a=>a.StartsWith("--capture=")) is {} capture)
    {
     await Task.Delay(700);UpdateLayout();
     var visual=(FrameworkElement)Content;
-    var bitmap=new RenderTargetBitmap((int)visual.ActualWidth+32,(int)visual.ActualHeight+32,96,96,PixelFormats.Pbgra32);bitmap.Render(visual);
+    var bitmap=new RenderTargetBitmap((int)visual.ActualWidth+32,(int)visual.ActualHeight+32,96,96,PixelFormats.Pbgra32);
+    var background=new DrawingVisual();using(var dc=background.RenderOpen())dc.DrawRectangle(Background,null,new Rect(0,0,bitmap.PixelWidth,bitmap.PixelHeight));bitmap.Render(background);bitmap.Render(visual);
     var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using var file=File.Create(capture[10..]);encoder.Save(file);
     Application.Current.Shutdown();
    }
@@ -89,10 +99,11 @@ public partial class StudioWindow : Window
  }
  void UpdateActions()
  {
-  Login.IsEnabled=!preview&&!busy;Logout.IsEnabled=!preview&&authenticated&&!busy;
+  Login.IsEnabled=!preview&&engineReady&&!busy;Logout.IsEnabled=!preview&&authenticated&&!busy;
   Send.IsEnabled=!preview&&authenticated&&!busy&&Models.SelectedItem is ModelChoice;
   Stop.IsEnabled=!preview&&busy;Models.IsEnabled=Effort.IsEnabled=Speed.IsEnabled=Access.IsEnabled=!preview&&!busy;
   Editor.IsReadOnly=preview;
+  Attach.IsEnabled=!preview&&!busy;ClearAttachments.IsEnabled=!preview&&!busy;
  }
  void Fail(Exception ex){Status.Text=ex.Message;}
  void LoadContext()
@@ -150,11 +161,6 @@ public partial class StudioWindow : Window
   }catch(Exception ex){Fail(ex);}
  }
  async void Logout_Click(object sender,RoutedEventArgs e){try{await rpc.CallAsync("account/logout",new{});await RefreshAccountAsync();}catch(Exception ex){Fail(ex);}}
- async void New_Click(object sender,RoutedEventArgs e)
- {
-  if(preview||busy)return;current=null;currentTurn=null;liveMessages.Clear();announced.Clear();Chat.Children.Clear();Threads.SelectedItem=null;
-  AddMessage("STUDIO","Novi razgovor za isti projekt. Projektni kontekst će biti dodan prvom zadatku.",false);await Task.CompletedTask;
- }
  async void Send_Click(object sender,RoutedEventArgs e)=>await SendAsync();
  async Task SendAsync()
  {
@@ -162,21 +168,28 @@ public partial class StudioWindow : Window
   var text=Prompt.Text.Trim();busy=true;UpdateActions();
   try
   {
-   if(current==null||string.IsNullOrEmpty(current.Id))
+   if(current==null)throw new IOException("Nedostaje jedini projektni razgovor.");
+   if(string.IsNullOrEmpty(current.Id))
    {
     var result=await rpc.CallAsync("thread/start",new{cwd=Isolation.Project,model=model.Id,sandbox="danger-full-access",approvalPolicy=Access.SelectedIndex==1?"never":"on-request",
      developerInstructions="You are the personal coding agent in TermoDom Studio, inside Windows Sandbox. Work only on the TermoDom project. Read AGENTS.md and docs/KONTEKST-ZA-CODEX.md before edits. Preserve existing changes; implement and test requests. Do not send commands to real heating/camera devices. Explain results in Croatian. This is a new isolated history, not a continuation containing the owner's private ChatGPT memories. Maintain project decisions in docs, and do not import external histories.\n\n"+Context.Text});
     var id=result.GetProperty("thread").GetProperty("id").GetString()!;
-    if(current==null){current=new StudioThread{Id=id,Label=text[..Math.Min(text.Length,55)]};threads.Insert(0,current);}else current.Id=id;
-    BindThreads();SaveThreads();
+    current.Id=id;UpdateConversationTitle();SaveThreads();
    }
    if(current.ImportPending)
    {
     if(privateImport==null)throw new IOException("Nedostaje privatni projektni razgovor za nastavak.");
     await rpc.CallAsync("thread/inject_items",new{threadId=current.Id,items=privateImport.ToItems()});current.ImportPending=false;SaveThreads();
    }
-   AddMessage("TI",text);Prompt.Clear();SaveThreads();
-   var turn=await rpc.CallAsync("turn/start",new{threadId=current.Id,input=new[]{new{type="text",text}},cwd=Isolation.Project,model=model.Id,effort=Effort.SelectedItem as string,
+   var input=new List<object>{new{type="text",text}};
+   foreach(var path in attachments)
+   {
+    var resolved=workspace!.Resolve(path);
+    if(new[]{".png",".jpg",".jpeg",".webp"}.Contains(Path.GetExtension(path).ToLowerInvariant()))input.Add(new{type="localImage",path=resolved});
+    else input.Add(new{type="text",text="Priložena projektna datoteka za ovaj zadatak: "+path});
+   }
+   AddMessage("TI",text+(attachments.Count>0?"\nPrivitci: "+string.Join(", ",attachments):""));Prompt.Clear();attachments.Clear();UpdateAttachments();SaveThreads();
+   var turn=await rpc.CallAsync("turn/start",new{threadId=current.Id,input=input.ToArray(),cwd=Isolation.Project,model=model.Id,effort=Effort.SelectedItem as string,
     serviceTierForTurn=(Speed.SelectedItem as SpeedChoice)?.Id??"default",approvalPolicy=Access.SelectedIndex==1?"never":"on-request",sandboxPolicy=new{type="externalSandbox",networkAccess="enabled"}});
    currentTurn=turn.GetProperty("turn").GetProperty("id").GetString();
    Status.Text=Access.SelectedIndex==1?"Codex radi s punim pristupom unutar Sandboxa. Dostupne mapirane datoteke može promijeniti ili izbrisati.":"Codex radi u Sandboxu, uz potvrde naredbi koje zahtijevaju odobrenje.";
@@ -210,6 +223,8 @@ public partial class StudioWindow : Window
     }
    }
    else if(method=="turn/started")currentTurn=p.GetProperty("turn").GetProperty("id").GetString();
+   else if(method=="thread/tokenUsage/updated"&&p.TryGetProperty("tokenUsage",out var usage)&&usage.TryGetProperty("last",out var last)&&last.TryGetProperty("inputTokens",out var tokens))
+   {ContextUsage.Text=$"Kontekst: {tokens.GetInt64():N0} tokena";}
    else if(method=="turn/completed")
    {
     busy=false;currentTurn=null;UpdateActions();SaveThreads();RefreshFiles();var turn=p.GetProperty("turn");Status.Text="Zadatak: "+Text(turn,"status");
@@ -243,19 +258,37 @@ public partial class StudioWindow : Window
  }).Task;
  TextBlock AddMessage(string role,string text,bool persist=true)
  {
-  var block=new TextBlock{Text=text,TextWrapping=TextWrapping.Wrap,LineHeight=23,FontSize=14,Foreground=new SolidColorBrush(Color.FromRgb(215,231,236))};
-  var box=new StackPanel{Margin=new Thickness(0,5,0,20)};box.Children.Add(new TextBlock{Text=role,FontSize=10,Foreground=Brushes.MediumTurquoise,Margin=new Thickness(0,0,0,7)});box.Children.Add(block);Chat.Children.Add(box);ChatScroll.ScrollToEnd();
+  var block=new TextBlock{Text=text,TextWrapping=TextWrapping.Wrap,LineHeight=25,FontSize=14,Foreground=new SolidColorBrush(Color.FromRgb(230,230,230))};
+  var box=new StackPanel{Margin=new Thickness(0,5,0,24)};box.Children.Add(new TextBlock{Text=role,FontSize=10,Foreground=Brushes.Gray,Margin=new Thickness(0,0,0,7)});box.Children.Add(block);Chat.Children.Add(box);ChatScroll.ScrollToEnd();
   if(persist&&current!=null)current.Messages.Add(new(role,text));return block;
  }
- void BindThreads(){Threads.ItemsSource=null;Threads.ItemsSource=threads;}
- void SaveThreads(){if(preview)return;var temp=IndexPath+".tmp";File.WriteAllText(temp,JsonSerializer.Serialize(threads));File.Move(temp,IndexPath,true);}
- async void Threads_Selected(object sender,SelectionChangedEventArgs e)
+ void RenderImportedImages(JsonElement message,StackPanel container)
  {
-  if(preview||busy||Threads.SelectedItem is not StudioThread selected||selected==current)return;
-  busy=true;UpdateActions();
-  try{if(selected.Id.Length>0)await rpc.CallAsync("thread/resume",new{threadId=selected.Id,cwd=Isolation.Project,excludeTurns=true,sandbox="danger-full-access",approvalPolicy=Access.SelectedIndex==1?"never":"on-request"});current=selected;Chat.Children.Clear();liveMessages.Clear();announced.Clear();foreach(var entry in selected.Messages)AddMessage(entry.Role,entry.Text,false);}
-  catch(Exception ex){Fail(ex);}finally{busy=false;UpdateActions();}
+  foreach(var part in message.GetProperty("content").EnumerateArray())
+  {
+   if(Text(part,"type")!="input_image")continue;
+   try
+   {
+    var uri=Text(part,"image_url");var comma=uri.IndexOf(',');if(comma<0)continue;
+    using var stream=new MemoryStream(Convert.FromBase64String(uri[(comma+1)..]));
+    var bitmap=new BitmapImage();bitmap.BeginInit();bitmap.CacheOption=BitmapCacheOption.OnLoad;bitmap.DecodePixelWidth=250;bitmap.StreamSource=stream;bitmap.EndInit();bitmap.Freeze();
+    container.Children.Add(new Image{Source=bitmap,MaxHeight=230,MaxWidth=250,HorizontalAlignment=HorizontalAlignment.Left,Stretch=Stretch.Uniform,Margin=new Thickness(0,10,0,0)});
+   }catch(Exception ex) when(ex is FormatException or NotSupportedException or IOException){Status.Text="Jedna prenesena slika nije dostupna za prikaz.";}
+  }
  }
+ void UpdateConversationTitle(){ConversationTitle.Text=current?.Label??"Modernizuj aplikaciju za grijanje";}
+ void SaveThreads(){if(preview)return;var temp=IndexPath+".tmp";File.WriteAllText(temp,JsonSerializer.Serialize(threads));File.Move(temp,IndexPath,true);}
+ void ToggleTools_Click(object sender,RoutedEventArgs e){var show=ToolPane.Visibility!=Visibility.Visible;ToolPane.Visibility=show?Visibility.Visible:Visibility.Collapsed;ToolsColumn.Width=new GridLength(show?430:0);}
+ void Repository_Click(object sender,RoutedEventArgs e)=>Process.Start(new ProcessStartInfo("https://github.com/leo25matko-boop/termodom-suradnja"){UseShellExecute=true});
+ void Attach_Click(object sender,RoutedEventArgs e)
+ {
+  if(preview||workspace==null)return;
+  var dialog=new Microsoft.Win32.OpenFileDialog{Title="Priloži datoteke ovog projekta",InitialDirectory=workspace.Root,Multiselect=true};
+  if(dialog.ShowDialog(this)!=true)return;
+  try{var selected=dialog.FileNames.Select(path=>Path.GetRelativePath(workspace.Root,path)).ToArray();foreach(var path in selected)workspace.Resolve(path);foreach(var path in selected)if(!attachments.Contains(path))attachments.Add(path);UpdateAttachments();}catch(Exception ex){Fail(ex);}
+ }
+ void ClearAttachments_Click(object sender,RoutedEventArgs e){attachments.Clear();UpdateAttachments();}
+ void UpdateAttachments(){AttachmentSummary.Text=attachments.Count>0?$"{attachments.Count} projektnih privitaka":"";ClearAttachments.Visibility=attachments.Count>0?Visibility.Visible:Visibility.Collapsed;}
  void RefreshFiles(){if(workspace==null)return;Files.ItemsSource=workspace.Files().Where(p=>p.Contains(Search.Text,StringComparison.OrdinalIgnoreCase)).ToList();}
  void Refresh_Click(object sender,RoutedEventArgs e){try{RefreshFiles();LoadContext();}catch(Exception ex){Fail(ex);}}
  void Search_Changed(object sender,TextChangedEventArgs e){if(Files!=null&&workspace!=null)RefreshFiles();}
@@ -268,6 +301,7 @@ public partial class StudioWindow : Window
  void OpenEditor(string relative)
  {
   var path=workspace!.Resolve(relative);if(new FileInfo(path).Length>2_000_000)throw new IOException("Za uređivač odaberi tekstnu datoteku do 2 MB.");
+  ToolPane.Visibility=Visibility.Visible;ToolsColumn.Width=new GridLength(430);
   var bytes=File.ReadAllBytes(path);if(bytes.Contains((byte)0))throw new IOException("Binarna datoteka se ne otvara u tekstnom uređivaču.");
   loadingEditor=true;Editor.Text=System.Text.Encoding.UTF8.GetString(bytes);loadingEditor=false;editorPath=relative;editorHash=Convert.ToHexString(SHA256.HashData(bytes));editorDirty=false;EditorName.Text=relative;
  }

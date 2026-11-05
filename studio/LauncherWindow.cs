@@ -11,7 +11,7 @@ public sealed class LauncherWindow : Window
  public LauncherWindow()
  {
   Style=(Style)Application.Current.FindResource(typeof(Window));
-  Title="TermoDom Studio · Osobni razvoj"; Width=710; Height=620; WindowStartupLocation=WindowStartupLocation.CenterScreen;
+  Title="TermoDom Studio · Osobni razvoj"; Width=710; Height=680; WindowStartupLocation=WindowStartupLocation.CenterScreen;
   var p=new StackPanel{Margin=new Thickness(35)};Content=p;
   p.Children.Add(new TextBlock{Text="TERMODOM  /  STUDIO",FontSize=13,Foreground=Brushes.Turquoise});
   p.Children.Add(new TextBlock{Text="Tvoj projekt. Zaseban Codex.",FontSize=29,Margin=new Thickness(0,25,0,16)});
@@ -23,6 +23,16 @@ public sealed class LauncherWindow : Window
    var start=new ProcessStartInfo("powershell.exe"){UseShellExecute=true,Verb="runas"};start.ArgumentList.Add("-NoProfile");start.ArgumentList.Add("-File");start.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory,"Enable-Sandbox.ps1"));Process.Start(start);
   });
   Add("Pregled sučelja bez prijave i bez agenta",()=>new StudioWindow(true).Show());
+  Add("Uvezi privatnu kopiju ovog razgovora",()=> {
+   var dialog=new Microsoft.Win32.OpenFileDialog{Title="Privatni izvoz projektnog razgovora",Filter="Privatni razgovor (*.json)|*.json"};
+   if(dialog.ShowDialog(this)!=true)return;
+   var imported=ConversationImport.Load(dialog.FileName);
+   var data=Path.Combine(Isolation.HostRoot,"Data");
+   if(File.Exists(Path.Combine(data,"studio-chats.json")))throw new IOException("Razgovor je već započet u Studiju. Postojeća povijest neće biti prepisana.");
+   Isolation.SecureDirectory(Isolation.HostRoot);var folder=Path.Combine(data,"Imports");Directory.CreateDirectory(folder);
+   File.Copy(dialog.FileName,Path.Combine(folder,"current-chat.json"),true);
+   status.Text=$"Privatno prenesen razgovor: {imported.Title}. Ne šalje se na GitHub. Otvori izolirani Studio za nastavak.";
+  });
   p.Children.Add(new TextBlock{Text="Osobna uporaba • Prijava kroz službeni OpenAI prozor unutar Sandboxa • Modeli i brzina ovise o računu.\nMreža je uključena radi Codexa i razvojnih alata. Nemoj u Sandbox unositi druge privatne podatke ili mrežne vjerodajnice.",FontSize=12,Foreground=Brushes.LightSlateGray,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(4,18,4,0)});
   status.Text=Isolation.SandboxInstalled?"Windows Sandbox je dostupan. Pri prvom otvaranju priprema se zasebna kopija projekta.":"Windows Sandbox trenutačno nije uključen. Pripremljena je administratorska aktivacija; možda će biti potrebno ponovno pokretanje.";
  }
