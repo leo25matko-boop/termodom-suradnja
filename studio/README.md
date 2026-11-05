@@ -106,6 +106,11 @@ Studio nije potpuna kopija svih vlasničkih funkcija Codex desktop aplikacije:
 postojeći konektori, sve ekstenzije, koordinacija drugih chatova, automacije i
 ugrađeni browser nisu preneseni samo prijavom. Ugrađen je stvarni Codex agent,
 njegovi alati za kod, odabir modela/brzine, potvrde, vlastita povijest, terminal i Git.
+Automatski računovi app/plugin konektori su isključeni kako nova prijava ne bi
+agentu otvorila pristup drugim privatnim izvorima preko povezanog računa. Git remote
+ostaje isti; dopuštenje za push/PR nije automatski preneseno iz host GitHub prijave.
+Za zajamčeni pristup samo jednom repozitoriju treba zaseban projektno ograničen
+razvojni pristup. Ne prijavljivati široki osobni GitHub token u ovo okruženje.
 
 Službeni izvori:
 - https://learn.chatgpt.com/docs/app-server

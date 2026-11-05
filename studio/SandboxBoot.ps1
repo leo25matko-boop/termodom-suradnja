@@ -20,6 +20,9 @@ sandbox_mode = "danger-full-access"
 approval_policy = "on-request"
 [analytics]
 enabled = false
+[features]
+apps = false
+plugins = false
 '@
   [IO.File]::WriteAllText("$env:CODEX_HOME\config.toml",$studioConfig,[Text.UTF8Encoding]::new($false))
   if (-not (Test-Path -LiteralPath C:\TermoDom\Project\.git)) {
