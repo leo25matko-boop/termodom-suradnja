@@ -12,7 +12,8 @@ try {
   $env:PATH="C:\TermoDom\App\Tools\git\cmd;C:\TermoDom\Data\Tools\dotnet;$env:PATH"
   foreach($name in 'OPENAI_API_KEY','OPENAI_BASE_URL','CHATGPT_API_KEY','GH_TOKEN','GITHUB_TOKEN','GIT_ASKPASS','SSH_AUTH_SOCK') {Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue}
   New-Item -ItemType Directory -Force $env:CODEX_HOME | Out-Null
-  # Ignore repository-local Codex config; this personal app owns its isolated configuration.
+  # Initialize only this app's isolated config. CLI arguments enforce the safety
+  # settings on every start; user-added MCP endpoints can persist here.
   $studioConfig=@'
 cli_auth_credentials_store = "file"
 forced_login_method = "chatgpt"
@@ -24,7 +25,9 @@ enabled = false
 apps = false
 plugins = false
 '@
-  [IO.File]::WriteAllText("$env:CODEX_HOME\config.toml",$studioConfig,[Text.UTF8Encoding]::new($false))
+  if (-not (Test-Path -LiteralPath "$env:CODEX_HOME\config.toml")) {
+    [IO.File]::WriteAllText("$env:CODEX_HOME\config.toml",$studioConfig,[Text.UTF8Encoding]::new($false))
+  }
   if (-not (Test-Path -LiteralPath C:\TermoDom\Project\.git)) {
     & C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project init -b studio
     if($LASTEXITCODE){throw 'Cannot initialize isolated Git project.'}

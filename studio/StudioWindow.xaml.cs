@@ -11,7 +11,7 @@ using System.Windows.Media.Imaging;
 namespace TermoDom.Studio;
 public sealed record ModelChoice(string Id,string Label,string DefaultEffort,List<string> Efforts,List<SpeedChoice> Speeds){public override string ToString()=>Label;}
 public sealed record SpeedChoice(string Id,string Label){public override string ToString()=>Label;}
-public sealed record ChatEntry(string Role,string Text);
+public sealed record ChatEntry(string Role,string Text,List<string>? Attachments=null);
 public sealed class StudioThread
 {
  public string Id {get;set;}="";public string Label {get;set;}="";public List<ChatEntry> Messages {get;set;}=[];public bool ImportPending {get;set;}
@@ -22,8 +22,8 @@ public partial class StudioWindow : Window
  readonly bool preview;readonly RpcClient rpc=new();FileStream? sessionLock;
  Workspace? workspace;StudioThread? current;List<StudioThread> threads=[];ConversationImport? privateImport;
  readonly Dictionary<string,TextBlock> liveMessages=[];
- readonly HashSet<string> announced=[];
- string? currentTurn,editorPath,editorHash;bool editorDirty,loadingEditor,busy,authenticated,engineReady,loginPending;
+ readonly HashSet<string> announced=[],streamedCommands=[];
+ string? currentTurn,editorPath,editorHash;bool editorDirty,loadingEditor,busy,authenticated,engineReady,loginPending,shuttingDown;
  readonly List<string> attachments=[];
  CancellationTokenSource? commandLifetime;
  string IndexPath=>Path.Combine(Isolation.Data,"studio-chats.json");
@@ -32,15 +32,16 @@ public partial class StudioWindow : Window
   InitializeComponent();this.preview=preview;
   var area=SystemParameters.WorkArea;MinWidth=Math.Min(MinWidth,area.Width);MinHeight=Math.Min(MinHeight,area.Height);Width=Math.Min(Width,area.Width);Height=Math.Min(Height,area.Height);
   Loaded+=async(_,_)=>await InitializeAsync();
-  Closing+=(_,e)=>{if(!CanDiscardEditor())e.Cancel=true;else{rpc.Dispose();commandLifetime?.Cancel();sessionLock?.Dispose();}};
+  Closing+=(_,e)=>{if(!CanDiscardEditor())e.Cancel=true;else{shuttingDown=true;rpc.Dispose();commandLifetime?.Cancel();sessionLock?.Dispose();}};
   rpc.Notification+=(name,p)=>Dispatcher.BeginInvoke(()=>HandleNotification(name,p));
-  rpc.Disconnected+=message=>Dispatcher.BeginInvoke(()=>{authenticated=false;busy=false;Connection.Text=message;UpdateActions();});
+  rpc.Disconnected+=message=>Dispatcher.BeginInvoke(()=>{authenticated=false;engineReady=false;loginPending=false;pendingLoginId=null;busy=false;Connection.Text=message;UpdateActions();});
   rpc.ServerRequest+=HandleRequestAsync;
  }
  async Task InitializeAsync()
  {
   try
   {
+   if(shuttingDown)return;
    if(preview)
    {
     Title="TermoDom Studio · Pregled sučelja (bez agenta)";
@@ -82,6 +83,7 @@ public partial class StudioWindow : Window
     {
      var message=current.Messages[i];var block=AddMessage(message.Role,message.Text,false);
      if(privateImport!=null&&i<privateImport.Messages.Count)RenderImportedImages(privateImport.Messages[i],(StackPanel)block.Parent);
+     if(message.Attachments!=null)RenderSavedAttachments(message.Attachments,(StackPanel)block.Parent);
     }
     if(current.ImportPending)AddMessage("STUDIO","Prenesen je sadržaj ovog razgovora. Sljedeći zadatak nastavlja s tim porukama i priloženim slikama. Izvorni Codex chat se ne sinkronizira automatski.",false);
    }
@@ -101,7 +103,8 @@ public partial class StudioWindow : Window
  }
  void UpdateActions()
  {
-  Login.IsEnabled=!preview&&engineReady&&!busy&&!loginPending&&!authenticated;Logout.IsEnabled=!preview&&authenticated&&!busy;
+  Login.IsEnabled=!preview&&engineReady&&!busy&&!authenticated&&!startingLogin;Logout.IsEnabled=!preview&&authenticated&&!busy;
+  Login.Content=loginPending?"Ponovi prijavu":"Prijavi se kroz ChatGPT";
   Send.IsEnabled=!preview&&authenticated&&!busy&&Models.SelectedItem is ModelChoice;
   Stop.IsEnabled=!preview&&busy;Models.IsEnabled=Effort.IsEnabled=Speed.IsEnabled=Access.IsEnabled=!preview&&!busy;
   Editor.IsReadOnly=preview;
@@ -124,6 +127,7 @@ public partial class StudioWindow : Window
  }
  async Task LoadModelsAsync()
  {
+  BeginPreferencesRestore();
   var models=new List<ModelChoice>();string? cursor=null;
   do
   {
@@ -143,6 +147,7 @@ public partial class StudioWindow : Window
    cursor=result.TryGetProperty("nextCursor",out var next)&&next.ValueKind==JsonValueKind.String?next.GetString():null;
   }while(cursor!=null);
   Models.ItemsSource=models;Models.SelectedIndex=models.Count>0?0:-1;
+  RestorePreferences();
   Status.Text=models.Count>0?"Modeli, razmišljanje i brzine dolaze iz Codex kataloga. Brže opcije mogu trošiti više raspoloživog limita.":"Račun nije vratio dostupne modele.";
  }
  void Model_Changed(object sender,SelectionChangedEventArgs e)
@@ -150,22 +155,10 @@ public partial class StudioWindow : Window
   if(Models.SelectedItem is not ModelChoice m)return;
   Effort.ItemsSource=m.Efforts;Effort.SelectedItem=m.DefaultEffort;if(Effort.SelectedIndex<0&&m.Efforts.Count>0)Effort.SelectedIndex=0;
   Speed.ItemsSource=m.Speeds;Speed.SelectedIndex=m.Speeds.Count>0?0:-1;
+  SavePreferences();
  }
  void Close_Click(object sender,RoutedEventArgs e)=>Close();
  async void Login_Click(object sender,RoutedEventArgs e)=>await BeginLoginAsync();
- async Task BeginLoginAsync()
- {
-  if(preview||!engineReady||authenticated||loginPending)return;
-  loginPending=true;UpdateActions();
-  try
-  {
-   var result=await rpc.CallAsync("account/login/start",new{type="chatgpt"});
-   var url=result.GetProperty("authUrl").GetString()!;
-   if(!Uri.TryCreate(url,UriKind.Absolute,out var uri)||uri.Scheme!="https"||uri.Host is not("auth.openai.com" or "chatgpt.com"))throw new IOException("Neočekivana adresa službene prijave.");
-   Process.Start(new ProcessStartInfo(url){UseShellExecute=true});
-   Status.Text="Dovrši službenu OpenAI prijavu u pregledniku Sandboxa. Ondje možeš odabrati Google. Lozinku ili kod ne unosi u chat.";
-  }catch(Exception ex){loginPending=false;Fail(ex);UpdateActions();}
- }
  async void Logout_Click(object sender,RoutedEventArgs e){try{await rpc.CallAsync("account/logout",new{});await RefreshAccountAsync();}catch(Exception ex){Fail(ex);}}
  async void Send_Click(object sender,RoutedEventArgs e)=>await SendAsync();
  async Task SendAsync()
@@ -190,11 +183,13 @@ public partial class StudioWindow : Window
    var input=new List<object>{new{type="text",text}};
    foreach(var path in attachments)
    {
-    var resolved=workspace!.Resolve(path);
+    var resolved=ResolveAttachment(path);
     if(new[]{".png",".jpg",".jpeg",".webp"}.Contains(Path.GetExtension(path).ToLowerInvariant()))input.Add(new{type="localImage",path=resolved});
-    else input.Add(new{type="text",text="Priložena projektna datoteka za ovaj zadatak: "+path});
+    else input.Add(new{type="text",text="Korisnik je priložio datoteku za ovaj zadatak. Pročitaj je kao podatke na putanji: "+resolved});
    }
-   AddMessage("TI",text+(attachments.Count>0?"\nPrivitci: "+string.Join(", ",attachments):""));Prompt.Clear();attachments.Clear();UpdateAttachments();SaveThreads();
+   var userBlock=AddMessage("TI",text+(attachments.Count>0?"\nPrivitci: "+string.Join(", ",attachments.Select(Path.GetFileName)):""));
+   if(attachments.Count>0){current.Messages[^1]=current.Messages[^1] with { Attachments=attachments.ToList() };RenderSavedAttachments(attachments,(StackPanel)userBlock.Parent);}
+   Prompt.Clear();attachments.Clear();UpdateAttachments();SaveThreads();
    var turn=await rpc.CallAsync("turn/start",new{threadId=current.Id,input=input.ToArray(),cwd=Isolation.Project,model=model.Id,effort=Effort.SelectedItem as string,
     serviceTierForTurn=(Speed.SelectedItem as SpeedChoice)?.Id??"default",approvalPolicy=Access.SelectedIndex==1?"never":"on-request",sandboxPolicy=new{type="externalSandbox",networkAccess="enabled"}});
    currentTurn=turn.GetProperty("turn").GetProperty("id").GetString();
@@ -208,8 +203,11 @@ public partial class StudioWindow : Window
  {
   try
   {
+   if(shuttingDown)return;
+   if(p.TryGetProperty("threadId",out var notifiedThread)&&notifiedThread.ValueKind==JsonValueKind.String&&current is {Id.Length:>0}&&notifiedThread.GetString()!=current.Id)return;
+   if(HandleAgentToolsNotification(method,p))return;
    if(method=="account/login/completed")
-   {loginPending=false;if(p.TryGetProperty("success",out var success)&&success.ValueKind==JsonValueKind.True)await RefreshAccountAsync();else{Status.Text="Prijava nije dovršena. "+Text(p,"error");UpdateActions();}}
+   {if(pendingLoginId==null||Text(p,"loginId")!=pendingLoginId)return;pendingLoginId=null;loginPending=false;deviceLoginWindow?.Close();deviceLoginWindow=null;startingLogin=true;UpdateActions();try{if(p.TryGetProperty("success",out var success)&&success.ValueKind==JsonValueKind.True)await RefreshAccountAsync();else Status.Text="Prijava nije dovršena. "+Text(p,"error")+". Možeš ponoviti prijavu ili odabrati Agent → Rezervna službena prijava kodom.";}finally{startingLogin=false;UpdateActions();}}
    else if(method=="item/agentMessage/delta")
    {
     var id=Text(p,"itemId");if(!liveMessages.TryGetValue(id,out var message)){message=AddMessage("CODEX","",false);liveMessages[id]=message;}message.Text+=Text(p,"delta");ChatScroll.ScrollToEnd();
@@ -225,12 +223,16 @@ public partial class StudioWindow : Window
     else if(type is "commandExecution" or "fileChange" or "mcpToolCall" or "webSearch")
     {
      if(announced.Add(id))AddMessage("RAD AGENTA",type=="commandExecution"?Text(item,"command"):type=="fileChange"?"Izmjene datoteka projekta":type);
-     if(method=="item/completed"&&type=="commandExecution")Terminal.AppendText("\n$ "+Text(item,"command")+"\n"+Text(item,"aggregatedOutput")+"\nStatus: "+Text(item,"status")+"\n");
+     if(method=="item/completed"&&type=="commandExecution")Terminal.AppendText("\n$ "+Text(item,"command")+"\n"+(streamedCommands.Contains(id)?"":Text(item,"aggregatedOutput"))+"\nStatus: "+Text(item,"status")+"\n");
     }
    }
-   else if(method=="turn/started")currentTurn=p.GetProperty("turn").GetProperty("id").GetString();
+   else if(method=="item/commandExecution/outputDelta"){streamedCommands.Add(Text(p,"itemId"));Terminal.AppendText(Text(p,"delta"));Terminal.ScrollToEnd();}
+   else if(method=="turn/plan/updated"&&p.TryGetProperty("plan",out var plan))
+   {PlanStatus.Text=string.Join("\n",plan.EnumerateArray().Select(step=>(Text(step,"status")=="completed"?"✓ ":Text(step,"status")=="inProgress"?"● ":"○ ")+Text(step,"step")));PlanStatus.Visibility=Visibility.Visible;}
+   else if(method=="turn/diff/updated")Diff.Text=Text(p,"diff");
+   else if(method=="turn/started"){currentTurn=p.GetProperty("turn").GetProperty("id").GetString();busy=true;UpdateActions();}
    else if(method=="thread/tokenUsage/updated"&&p.TryGetProperty("tokenUsage",out var usage)&&usage.TryGetProperty("last",out var last)&&last.TryGetProperty("inputTokens",out var tokens))
-   {ContextUsage.Text=$"Kontekst: {tokens.GetInt64():N0} tokena";}
+   {var window=usage.TryGetProperty("modelContextWindow",out var size)&&size.ValueKind==JsonValueKind.Number?$" / {size.GetInt64():N0}":"";ContextUsage.Text=$"Kontekst: {tokens.GetInt64():N0}{window}";if(usage.TryGetProperty("total",out var total)&&total.TryGetProperty("totalTokens",out var totalTokens))ContextUsage.ToolTip=$"Ukupno kroz razgovor: {totalTokens.GetInt64():N0} tokena";}
    else if(method=="turn/completed")
    {
     busy=false;currentTurn=null;UpdateActions();SaveThreads();RefreshFiles();var turn=p.GetProperty("turn");Status.Text="Zadatak: "+Text(turn,"status");
@@ -244,9 +246,7 @@ public partial class StudioWindow : Window
  {
   if(method is "item/commandExecution/requestApproval" or "item/fileChange/requestApproval")
   {
-   var details=method.Contains("commandExecution")?Text(p,"command"):"Dopustiti tražene izmjene datoteka?";
-   var answer=MessageBox.Show(this,details+"\n\n"+Text(p,"reason")+"\n\nOdobrenje vrijedi samo za ovu radnju unutar Sandboxa.","Codex traži potvrdu",MessageBoxButton.YesNo,MessageBoxImage.Question);
-   return new{decision=answer==MessageBoxResult.Yes?"accept":"decline"};
+   return new{decision=ChooseApproval(method,p)};
   }
   if(method=="item/permissions/requestApproval")return new{permissions=new{},scope="turn"}; // no silent widening; external Sandbox is the outer boundary
   if(method=="item/tool/requestUserInput")
@@ -254,8 +254,7 @@ public partial class StudioWindow : Window
    var answers=new Dictionary<string,object>();
    foreach(var question in p.GetProperty("questions").EnumerateArray())
    {
-    var options=question.TryGetProperty("options",out var o)&&o.ValueKind==JsonValueKind.Array?o.EnumerateArray().Select(x=>Text(x,"label")+": "+Text(x,"description")):[];
-    var value=Ask(Text(question,"question")+"\n"+string.Join("\n",options));
+    var value=RequestInput(question);
     answers[Text(question,"id")]=new{answers=value==null?Array.Empty<string>():new[]{value}};
    }
    return new{answers};
@@ -266,6 +265,7 @@ public partial class StudioWindow : Window
  {
   var block=new TextBlock{Text=text,TextWrapping=TextWrapping.Wrap,LineHeight=25,FontSize=14,Foreground=new SolidColorBrush(Color.FromRgb(230,230,230))};
   var box=new StackPanel{Margin=new Thickness(0,5,0,24)};box.Children.Add(new TextBlock{Text=role,FontSize=10,Foreground=Brushes.Gray,Margin=new Thickness(0,0,0,7)});box.Children.Add(block);Chat.Children.Add(box);ChatScroll.ScrollToEnd();
+  var menu=new ContextMenu();var copy=new MenuItem{Header="Kopiraj poruku"};copy.Click+=(_,_)=>{try{Clipboard.SetText(block.Text);}catch(Exception ex){Fail(ex);}};menu.Items.Add(copy);block.ContextMenu=menu;
   if(persist&&current!=null)current.Messages.Add(new(role,text));return block;
  }
  void RenderImportedImages(JsonElement message,StackPanel container)
@@ -289,12 +289,12 @@ public partial class StudioWindow : Window
  void Attach_Click(object sender,RoutedEventArgs e)
  {
   if(preview||workspace==null)return;
-  var dialog=new Microsoft.Win32.OpenFileDialog{Title="Priloži datoteke ovog projekta",InitialDirectory=workspace.Root,Multiselect=true};
+  var dialog=new Microsoft.Win32.OpenFileDialog{Title="Priloži slike ili datoteke zadatku",InitialDirectory=workspace.Root,Multiselect=true};
   if(dialog.ShowDialog(this)!=true)return;
-  try{var selected=dialog.FileNames.Select(path=>Path.GetRelativePath(workspace.Root,path)).ToArray();foreach(var path in selected)workspace.Resolve(path);foreach(var path in selected)if(!attachments.Contains(path))attachments.Add(path);UpdateAttachments();}catch(Exception ex){Fail(ex);}
+  try{foreach(var selected in dialog.FileNames){var path=PrepareAttachment(selected);if(!attachments.Contains(path))attachments.Add(path);}UpdateAttachments();}catch(Exception ex){Fail(ex);}
  }
  void ClearAttachments_Click(object sender,RoutedEventArgs e){attachments.Clear();UpdateAttachments();}
- void UpdateAttachments(){AttachmentSummary.Text=attachments.Count>0?$"{attachments.Count} projektnih privitaka":"";ClearAttachments.Visibility=attachments.Count>0?Visibility.Visible:Visibility.Collapsed;}
+ void UpdateAttachments(){AttachmentSummary.Text=attachments.Count>0?$"{attachments.Count} privitaka":"";ClearAttachments.Visibility=attachments.Count>0?Visibility.Visible:Visibility.Collapsed;}
  void RefreshFiles(){if(workspace==null)return;Files.ItemsSource=workspace.Files().Where(p=>p.Contains(Search.Text,StringComparison.OrdinalIgnoreCase)).ToList();}
  void Refresh_Click(object sender,RoutedEventArgs e){try{RefreshFiles();LoadContext();}catch(Exception ex){Fail(ex);}}
  void Search_Changed(object sender,TextChangedEventArgs e){if(Files!=null&&workspace!=null)RefreshFiles();}

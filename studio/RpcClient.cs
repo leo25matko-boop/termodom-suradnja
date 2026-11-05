@@ -21,14 +21,14 @@ public sealed class RpcClient : IDisposable
   Directory.CreateDirectory(home);
   var info=new ProcessStartInfo(executable){WorkingDirectory=project,UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
   info.ArgumentList.Add("app-server");info.ArgumentList.Add("--stdio");
-  foreach(var setting in new[]{"cli_auth_credentials_store=\"file\"","analytics.enabled=false","sandbox_mode=\"danger-full-access\"","approval_policy=\"on-request\"","features.apps=false","features.plugins=false"}){info.ArgumentList.Add("-c");info.ArgumentList.Add(setting);}
+  foreach(var setting in new[]{"cli_auth_credentials_store=\"file\"","forced_login_method=\"chatgpt\"","analytics.enabled=false","sandbox_mode=\"danger-full-access\"","approval_policy=\"on-request\"","features.apps=false","features.plugins=false","web_search=\"live\""}){info.ArgumentList.Add("-c");info.ArgumentList.Add(setting);}
   info.Environment["CODEX_HOME"]=Path.GetFullPath(home);
   foreach(var name in new[]{"OPENAI_API_KEY","OPENAI_BASE_URL","CHATGPT_API_KEY","GH_TOKEN","GITHUB_TOKEN","GIT_ASKPASS","SSH_AUTH_SOCK"})info.Environment.Remove(name);
   process=Process.Start(info)??throw new IOException("Codex se ne može pokrenuti.");
   _=ReadLoopAsync(process.StandardOutput);
   // Never persist stderr, protocol messages, OAuth URLs or auth/account responses to logs.
   _=DrainErrorAsync(process.StandardError);
-  await CallAsync("initialize",new{clientInfo=new{name="termodom_studio",title="TermoDom Studio",version="1.0.1"},capabilities=new{experimentalApi=true}});
+  await CallAsync("initialize",new{clientInfo=new{name="termodom_studio",title="TermoDom Studio",version="1.1.0"},capabilities=new{experimentalApi=true}});
   await WriteAsync(new{method="initialized",@params=new{}});
  }
  async Task DrainErrorAsync(StreamReader reader){try{while(await reader.ReadLineAsync(lifetime.Token)!=null){}}catch(OperationCanceledException){}catch(IOException){}}

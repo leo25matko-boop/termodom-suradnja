@@ -64,11 +64,45 @@ try
  Refuses(()=>ConversationImport.Load(importFile),"automatic conversation load cannot fetch remote images");
  File.WriteAllText(importFile,"""{"schemaVersion":1,"title":"Project","sourceThreadId":"synthetic","messages":[{"role":"assistant","content":[{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}]}]}""");
  Refuses(()=>ConversationImport.Load(importFile),"only user-attached images enter transferred conversation");
+ var preferenceFile=Path.Combine(root,"preferences","studio-preferences.json");
+ Check(StudioPreferences.Load(preferenceFile)==new StudioPreferences(),"new Studio uses safe empty UI preferences");
+ var preferences=new StudioPreferences{ModelId="synthetic-model",Effort="high",SpeedId="fast",FullAccess=true};
+ preferences.Save(preferenceFile);
+ Check(StudioPreferences.Load(preferenceFile)==preferences,"model effort speed and explicitly chosen Sandbox access persist across restart");
+ var changedPreferences=preferences with{Effort="medium",SpeedId="default",FullAccess=false};changedPreferences.Save(preferenceFile);
+ Check(StudioPreferences.Load(preferenceFile)==changedPreferences,"new selections atomically replace earlier UI preferences");
+ Check(Directory.GetFiles(Path.GetDirectoryName(preferenceFile)!).Length==1,"preference save leaves no temporary state files");
+ using(var preferenceJson=JsonDocument.Parse(File.ReadAllText(preferenceFile)))
+  Check(preferenceJson.RootElement.EnumerateObject().Select(p=>p.Name).OrderBy(s=>s).SequenceEqual(new[]{"Effort","FullAccess","ModelId","SchemaVersion","SpeedId"}),"UI preference file contains no account credentials or conversation data");
+ File.WriteAllText(preferenceFile,"""{"SchemaVersion":2,"ModelId":"synthetic-model"}""");
+ Refuses(()=>StudioPreferences.Load(preferenceFile),"unsupported preference schema cannot silently enable old access settings");
+ File.WriteAllText(preferenceFile,"""{"ModelId":null}""");
+ Refuses(()=>StudioPreferences.Load(preferenceFile),"invalid preference content is rejected before model selection");
  if(args.FirstOrDefault(a=>a.StartsWith("--codex=")) is {} arg)
  {
   using var rpc=new RpcClient();var home=Path.Combine(root,"empty-home");await rpc.StartAsync(arg[8..],project,home,probe:true);
   var account=await rpc.CallAsync("account/read",new{refreshToken=false});Check(account.GetProperty("account").ValueKind==JsonValueKind.Null,"new Codex home contains no existing account");
+  string? testLoginId=null;var loginProbeFailed=false;
+  try
+  {
+   // Never open the browser or print the authorization URL, nonce, or login ID.
+   // No device-code request is made and no personal account is authenticated.
+   var login=await rpc.CallAsync("account/login/start",new{type="chatgpt"});
+   testLoginId=login.GetProperty("loginId").GetString();
+   Check(!string.IsNullOrWhiteSpace(testLoginId),"official browser login returns a cancelable request identifier");
+   var address=login.GetProperty("authUrl").GetString();
+   Check(Uri.TryCreate(address,UriKind.Absolute,out var loginUri)&&loginUri.Scheme=="https"&&loginUri.IsDefaultPort&&loginUri.UserInfo.Length==0&&loginUri.Host is "auth.openai.com" or "chatgpt.com","official login returns only a supported HTTPS authorization endpoint");
+   var canceled=await rpc.CallAsync("account/login/cancel",new{loginId=testLoginId});
+   Check(canceled.GetProperty("status").GetString()=="canceled","official browser login can be canceled through the actual protocol");testLoginId=null;
+   var afterCancel=await rpc.CallAsync("account/read",new{refreshToken=false});
+   Check(afterCancel.GetProperty("account").ValueKind==JsonValueKind.Null,"canceling the synthetic login leaves the isolated home unauthenticated");
+  }
+  catch{loginProbeFailed=true;} // Do not propagate potentially sensitive auth error details into test logs.
+  finally{if(testLoginId!=null)try{await rpc.CallAsync("account/login/cancel",new{loginId=testLoginId});}catch{}}
+  Check(!loginProbeFailed,"browser login start/cancel probe finishes without authenticating a personal account");
   var models=await rpc.CallAsync("model/list",new{limit=100,includeHidden=false});Check(models.GetProperty("data").GetArrayLength()>0,"official model catalog protocol works without copying owner auth");
+  var skills=await rpc.CallAsync("skills/list",new{cwds=new[]{project},forceReload=true});Check(skills.GetProperty("data").ValueKind==JsonValueKind.Array,"skills catalog reads only the synthetic project in a separate Codex home");
+  var mcp=await rpc.CallAsync("mcpServerStatus/list",new{limit=100,detail="toolsAndAuthOnly",threadId=(string?)null,cursor=(string?)null});Check(mcp.GetProperty("data").ValueKind==JsonValueKind.Array,"MCP status catalog protocol works without importing host integrations");
   var thread=await rpc.CallAsync("thread/start",new{cwd=project,sandbox="danger-full-access",approvalPolicy="on-request"});var id=thread.GetProperty("thread").GetProperty("id").GetString();
   await rpc.CallAsync("thread/inject_items",new{threadId=id,items=imported.ToItems()});Check(true,"conversation import uses actual Codex protocol");
   var resumed=await rpc.CallAsync("thread/resume",new{threadId=id,cwd=project,excludeTurns=true,sandbox="danger-full-access",approvalPolicy="on-request"});Check(resumed.GetProperty("thread").GetProperty("id").GetString()==id,"imported conversation resumes with persistent engine history");

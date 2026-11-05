@@ -7,7 +7,7 @@ Ovo je osobni lokalni klijent; nije usluga koja dijeli vlasnikov račun zaposlen
 
 ## Početak
 
-1. Pokreni `TermoDom-Studio-Setup-1.0.1-x64.exe` i odaberi **Instaliraj za mene**.
+1. Pokreni `TermoDom-Studio-Setup-1.1.0-x64.exe` i odaberi **Instaliraj za mene**.
    Prečaci se stvaraju na radnoj površini i u izborniku Start. Aplikacija i alati
    ostaju u korisničkoj mapi Programs, odvojeni od privatnih Studio podataka.
 2. **Otvori Studio** ili prečac na radnoj površini jednim pokretanjem provjerava
@@ -45,6 +45,42 @@ Ovo je osobni lokalni klijent; nije usluga koja dijeli vlasnikov račun zaposlen
    Sandboxa. Zatim **Windows testovi**, ili `./scripts/team/Dev.ps1 -Action Run`.
    Git i službeni Codex već su u paketu. Android JDK/SDK nisu u instalateru;
    agent ih može pripremiti unutar Sandboxa uz prihvaćanje potrebnih licenci.
+
+## Alati unutar jednog razgovora
+
+Izbornik **Projekt** stvara datoteke i mape, pretražuje tekst projekta, otvara
+izoliranu projektnu mapu te pokreće razvojnu aplikaciju i testove. Uređivač
+podržava spremanje, ponovno čitanje i uobičajeno Ctrl+Z poništavanje unosa.
+**Git** stvara granu, sprema commit, izvršava fetch, čisti fast-forward pull i
+push radne grane. Vraćanje odabrane praćene datoteke traži pregled diff-a i
+potvrdu; ostale datoteke i staged sadržaj ostaju sačuvani. GitHub PR i novi
+repozitorij otvaraju službene GitHub obrasce u Sandboxu. Nisu automatski stvoreni.
+MinGit nema unaprijed pripremljenu vlasnikovu GitHub prijavu; push zahtijeva
+vlastitu odgovarajuću prijavu. To nije jamstvo projektno ograničenih GitHub prava.
+
+**Razgovor** pretražuje poruke, privatno izvozi vidljive poruke i slikovne
+privitke u `Data/Exports` te sažima trenutni kontekst. Izvoz nije automatska
+sinkronizacija s izvornim Codex razgovorom. **Agent** pokreće stvarni pregled
+Git izmjena unutar istog razgovora, prikazuje stvarne vještine, MCP alate i
+limite računa. Moguće je stvoriti projektnu SKILL.md datoteku, uključiti ili
+isključiti vještinu i dodati HTTPS MCP uslugu s njezinom službenom OAuth prijavom
+ako je podržava. MCP adrese i nove postavke ostaju u izoliranom CODEX_HOME;
+host konfiguracija i postojeći konektori se ne uvoze. Pri dodavanju usluge
+korisnik sam pregledava njezine tražene ovlasti. CLI pri svakom pokretanju
+prisilno zadržava vlastitu ChatGPT prijavu, isključene apps/plugins i vanjski
+Sandbox. Uključena je stvarna web pretraga engina. To ne ugrađuje sve vlasničke
+browser/computer-use alate službene Codex aplikacije.
+
+Izbor modela, razmišljanja, brzine i izričito odabrane razine Sandbox pristupa
+pamti se između pokretanja. Plan i izlaz agentovih naredbi prikazuju se uživo.
+Privitak može biti projektna datoteka ili izričito odabrana datoteka unutar
+Sandboxa, koja se sprema u privatne podatke; Codex prijavne datoteke se odbijaju.
+
+Ako obična prijava ne dovrši povratak iz preglednika, odaberi **Agent → Rezervna
+službena prijava kodom**. Jednokratni kod unosi se samo na službenoj stranici.
+Ta beta mogućnost može zahtijevati uključivanje u postavkama računa ili
+odobrenje administratora workspacea. Ponovna obična prijava otkazuje prethodni
+pokušaj. Prijavu nije moguće provjeravati u načinu pregleda bez Sandboxa.
 
 ## Projektni kontinuitet i Git
 
@@ -117,8 +153,8 @@ Build i protokolske lokalne provjere obuhvaćaju stvarni Codex 0.166.0 initializ
 prazan odvojeni account/read, model/list, command/exec, uvoz sintetičkih poruka i
 nastavak uvezenog razgovora kroz stdio. Te provjere
 ne pozivaju model, ne prijavljuju vlasnika i nisu dokaz izolacije živog Sandboxa.
-Na razvojnom kućnom računalu Sandbox je isključen. Potrebno je završiti njegovu
-aktivaciju, službenu prijavu, prvi model zadatak, nastavak razgovora nakon restarta
+Aktivacija Sandboxa potvrđena je u lokalnoj Windows pripremi; Windows traži restart.
+Potrebno je završiti ponovno pokretanje, službenu prijavu, prvi model zadatak i nastavak razgovora nakon restarta
 i praktičnu provjeru nedostupnosti host mapa. Paket do tada treba smatrati
 izgrađenim kandidatom za osobno isprobavanje, a ne potpuno provjerenom zamjenom Codexa.
 Studio nije potpuna kopija svih vlasničkih funkcija Codex desktop aplikacije:
