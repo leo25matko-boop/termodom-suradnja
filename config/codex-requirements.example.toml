@@ -1,0 +1,19 @@
+# Install only on the OFFICE PC, by its administrator, at:
+# %ProgramData%\OpenAI\Codex\requirements.toml
+# Requires Codex >= 0.138.0; verify with the deployed client.
+# This is not enforced merely because it is stored in the Git repository.
+default_permissions = ":workspace"
+allowed_approval_policies = ["on-request"]
+allowed_sandbox_modes = ["read-only", "workspace-write"]
+
+[allowed_permission_profiles]
+":read-only" = true
+":workspace" = true
+
+[windows]
+allowed_sandbox_implementations = ["elevated"]
+
+# The office provisioning script adds actual protected Windows paths here.
+# NTFS ACLs remain necessary even when Codex denies those paths.
+# [permissions.filesystem]
+# deny_read = ['C:\Users\OWNER', 'C:\Private']

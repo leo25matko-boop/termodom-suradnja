@@ -1,0 +1,61 @@
+name: Provjera suradnje
+on:
+  push:
+    branches: [mail]
+  pull_request:
+    branches: [mail]
+permissions:
+  contents: read
+concurrency:
+  group: collaboration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-development:
+    name: Windows razvoj
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d
+        with:
+          dotnet-version: '8.0.x'
+      - name: Validate office scripts without changing accounts or permissions
+        shell: pwsh
+        run: |
+          $errors = @()
+          Get-ChildItem scripts/team/*.ps1 | ForEach-Object {
+            $tokens = $null; $problems = $null
+            [Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$problems) | Out-Null
+            $errors += $problems
+          }
+          if ($errors.Count) { $errors | Format-List; throw 'PowerShell parse failed' }
+      - name: Build and test native development app with fixtures
+        shell: pwsh
+        run: ./scripts/team/Dev.ps1 -Action Test
+  android-unit:
+    name: Android testovi
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Native debug compilation and local fixture tests
+        working-directory: android
+        run: bash ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon
+  source-safety:
+    name: Provjera izvora
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Reject credential files and common real token formats
+        run: python3 scripts/team/check-source.py

@@ -1,0 +1,200 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Verify native Android app and build release for local signing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Check the runner's preinstalled SDK
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [[ -z "$sdk" || ! -f "$sdk/platforms/android-36/android.jar" ]]; then
+            echo '::error::This runner must have Android SDK platform 36 preinstalled.'
+            exit 1
+          fi
+          if [[ ! -f "$sdk/build-tools/35.0.0/package.xml" ]]; then
+            echo '::error::This runner must have Android SDK Build Tools 35.0.0 preinstalled.'
+            exit 1
+          fi
+          java -version
+
+      - name: Verify Gradle wrapper
+        run: |
+          set -euo pipefail
+          echo '81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f  android/gradle/wrapper/gradle-wrapper.jar' | sha256sum --check --strict
+          chmod +x android/gradlew
+
+      - name: Build private native camera engine for Android ABIs
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          ndk="$(find "$sdk/ndk" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -n 1)"
+          if [[ -z "$ndk" || ! -x "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ]]; then
+            echo '::error::The runner must have a licensed Android NDK preinstalled.'
+            exit 1
+          fi
+          go version
+          python3 scripts/prepare-camera-engine.py --destination "$RUNNER_TEMP/termodom-camera-source"
+          export GOTOOLCHAIN=auto
+          export GOCACHE="$RUNNER_TEMP/termodom-go-cache"
+          export GOMODCACHE="$RUNNER_TEMP/termodom-go-modules"
+          export GOMAXPROCS=3
+          mkdir -p android-verification
+          printf 'Pinned go2rtc: b5948cfb25404cc5cb37b166ecaa2dca20b11d4b\nMemory-only config; authenticated loopback HTTP and RTSP.\n' >android-verification/camera-engine-build.txt
+          source_dir="$RUNNER_TEMP/termodom-camera-source"
+          output_dir="$GITHUB_WORKSPACE/android/app/src/main/jniLibs"
+          (cd "$source_dir" && go test -count=1 . ./internal/api ./internal/app ./internal/xiaomi ./pkg/xiaomi/...)
+          for spec in 'arm64-v8a:arm64:aarch64-linux-android26' 'armeabi-v7a:arm:armv7a-linux-androideabi26' 'x86_64:amd64:x86_64-linux-android26'; do
+            IFS=: read -r abi arch triple <<<"$spec"
+            echo "Building native camera engine for $abi"
+            mkdir -p "$output_dir/$abi"
+            export GOOS=android GOARCH="$arch" CGO_ENABLED=1
+            export CC="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/$triple-clang"
+            export CGO_LDFLAGS='-Wl,-z,max-page-size=16384'
+            if [[ "$arch" == arm ]]; then export GOARM=7; else unset GOARM || true; fi
+            (cd "$source_dir" && go build -p 3 -trimpath -buildvcs=false -buildmode=pie -ldflags='-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384' -o "$output_dir/$abi/libgo2rtc.so" .)
+            "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h "$output_dir/$abi/libgo2rtc.so" >"android-verification/camera-$abi-elf.txt"
+            grep 'DYN' "android-verification/camera-$abi-elf.txt" >/dev/null
+            sha256sum "$output_dir/$abi/libgo2rtc.so" >>android-verification/camera-engine-build.txt
+          done
+
+      - name: Test native parsers and build APKs
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease -PtermodomUnsigned=true --no-daemon --stacktrace
+
+      - name: Verify APK contains native screens only
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          apk = Path('android/app/build/outputs/apk/release/app-release-unsigned.apk')
+          with zipfile.ZipFile(apk) as archive:
+              assert archive.testzip() is None, 'APK ZIP integrity failed'
+              names = archive.namelist()
+              assert not any(name.lower().endswith(('.html', '.js', '.mjs')) for name in names), 'Web assets were packaged'
+              assets = [name for name in names if name.startswith('assets/')]
+              assert all(name.startswith(('assets/hrtfs/', 'assets/lua/')) for name in assets), 'Unexpected media assets were packaged'
+              for abi in ('arm64-v8a', 'armeabi-v7a', 'x86_64'):
+                  assert 'lib/' + abi + '/libgo2rtc.so' in names, 'Missing bundled camera engine: ' + abi
+              dex = b''.join(archive.read(name) for name in names if name.endswith('.dex'))
+              assert b'Landroid/webkit/WebView;' not in dex, 'WebView class reference found'
+              for native in ('MainActivity', 'TemperatureDialView', 'NativeChartView', 'HeatingRepository', 'SolarRepository', 'NativeCameraEngine', 'CameraPanel'):
+                  assert ('Lse/automatiziraj/termodom/' + native + ';').encode() in dex, 'Missing native class: ' + native
+          print('TERMODOM_NATIVE_APK_OK: native camera engine; no WebView, HTML, or JavaScript')
+          PY
+
+      - name: Upload APK for private signing
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: termodom-android-unsigned
+          overwrite: true
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Prepare Android emulator
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/termodom-android"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/termodom-avd"
+          mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME" android-verification
+          # Use only the runner's existing licenses. Never automatically accept new terms.
+          sdk_ready=false
+          for attempt in 1 2 3; do
+            if "$sdk/cmdline-tools/latest/bin/sdkmanager" --install 'emulator' 'system-images;android-35;default;x86_64' </dev/null; then sdk_ready=true; break; fi
+            echo "::warning::SDK download attempt $attempt failed; retrying the official package."
+            sleep 5
+          done
+          [[ "$sdk_ready" == true ]]
+          printf 'no\n' | "$sdk/cmdline-tools/latest/bin/avdmanager" create avd --force --name termodom-native --path "$ANDROID_AVD_HOME/termodom-native.avd" --package 'system-images;android-35;default;x86_64' --device pixel_5
+          test -f "$ANDROID_AVD_HOME/termodom-native.ini"
+          "$sdk/emulator/emulator" -list-avds
+          df -h "$RUNNER_TEMP"
+          if [[ -e /dev/kvm ]]; then sudo chmod 666 /dev/kvm; fi
+          "$sdk/emulator/emulator" -avd termodom-native -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader -memory 2048 -cores 2 >android-verification/emulator.log 2>&1 &
+          emulator_pid=$!
+          echo "$emulator_pid" >android-verification/emulator.pid
+          export PATH="$sdk/platform-tools:$PATH"
+          adb start-server
+          connected=false
+          for attempt in $(seq 1 90); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then cat android-verification/emulator.log; exit 1; fi
+            if [[ "$(adb get-state 2>/dev/null || true)" == 'device' ]]; then connected=true; break; fi
+            if (( attempt % 10 == 0 )); then tail -n 12 android-verification/emulator.log; fi
+            sleep 2
+          done
+          if [[ "$connected" != true ]]; then cat android-verification/emulator.log; exit 1; fi
+          for attempt in $(seq 1 120); do
+            if [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == '1' ]]; then break; fi
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then cat android-verification/emulator.log; exit 1; fi
+            if (( attempt % 10 == 0 )); then tail -n 8 android-verification/emulator.log; fi
+            sleep 2
+          done
+          [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == '1' ]]
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb shell wm size 1080x2340
+          adb shell wm density 440
+          adb shell input keyevent 82
+
+      - name: Verify native navigation and capture phone screens
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          export PATH="$sdk/platform-tools:$PATH"
+          adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+          adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          adb shell am instrument -w se.automatiziraj.termodom.debug.test/se.automatiziraj.termodom.NativeSmokeInstrumentation | tee android-verification/native-smoke.txt
+          adb logcat -d -t 500 >android-verification/android-logcat.txt
+          adb pull /sdcard/Android/data/se.automatiziraj.termodom.debug/files/native-smoke android-verification/screens || true
+          grep -q 'TERMODOM_NATIVE_SMOKE_OK' android-verification/native-smoke.txt
+
+      - name: Upload native verification results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: termodom-android-native-verification
+          overwrite: true
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest/
+            android/app/build/test-results/testDebugUnitTest/
+            android-verification/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop Android emulator
+        if: always()
+        run: |
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          "$sdk/platform-tools/adb" emu kill || true
+

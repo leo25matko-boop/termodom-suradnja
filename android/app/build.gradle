@@ -1,0 +1,110 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Release keys are supplied by the machine building the APK, never by this repo.
+def signingVariables = [
+    keystore: 'TERMODOM_ANDROID_KEYSTORE',
+    storePassword: 'TERMODOM_ANDROID_STORE_PASSWORD',
+    keyAlias: 'TERMODOM_ANDROID_KEY_ALIAS',
+    keyPassword: 'TERMODOM_ANDROID_KEY_PASSWORD'
+]
+def signingValues = signingVariables.collectEntries { key, variable ->
+    [(key): providers.environmentVariable(variable).orNull]
+}
+def hasReleaseSigning = signingValues.values().every { it != null && !it.isEmpty() }
+// CI may produce a deliberately unsigned artifact for private, local signing.
+// Normal release builds still require the private release keystore above.
+def unsignedRelease = providers.gradleProperty('termodomUnsigned').orElse('false').get() == 'true'
+
+android {
+    namespace 'se.automatiziraj.termodom'
+    compileSdk 36
+    buildToolsVersion '35.0.0'
+
+    defaultConfig {
+        applicationId 'se.automatiziraj.termodom'
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64' }
+        minSdk 26
+        targetSdk 36
+        versionCode 3
+        versionName '2.0.0'
+        testInstrumentationRunner 'se.automatiziraj.termodom.NativeSmokeInstrumentation'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // Android uses native Java views. The desktop HTML and JavaScript are never
+    // packaged into the Android app, even if an old assets directory exists.
+    sourceSets {
+        main.assets.srcDirs = []
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            keepDebugSymbols += ["**/libgo2rtc.so"]
+        }
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning && !unsignedRelease) {
+            release {
+                storeFile file(signingValues.keystore)
+                storePassword signingValues.storePassword
+                keyAlias signingValues.keyAlias
+                keyPassword signingValues.keyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
+        release {
+            minifyEnabled true
+            shrinkResources false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseSigning && !unsignedRelease) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+dependencies {
+    implementation 'org.jsoup:jsoup:1.21.2'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'org.videolan.android:libvlc-all:3.7.7'
+    testImplementation 'junit:junit:4.13.2'
+    // Local JVM tests need a real JSON implementation instead of android.jar stubs.
+    testImplementation 'org.json:json:20260814'
+}
+
+def verifyReleaseSigning = tasks.register('verifyReleaseSigning') {
+    onlyIf { !unsignedRelease }
+    doLast {
+        def missing = signingVariables.findAll { key, variable ->
+            signingValues[key] == null || signingValues[key].isEmpty()
+        }.values()
+        if (!missing.isEmpty()) {
+            throw new GradleException('Release APK requires signing. Set these environment variables: ' + missing.join(', '))
+        }
+        if (!file(signingValues.keystore).isFile()) {
+            throw new GradleException('TERMODOM_ANDROID_KEYSTORE must point to the existing private release keystore.')
+        }
+    }
+}
+
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach {
+    dependsOn verifyReleaseSigning
+}
