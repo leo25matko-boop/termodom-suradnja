@@ -13,6 +13,6 @@ public partial class App : Application
    if(!Isolation.IsWorker) { MessageBox.Show("Radni Codex može se pokrenuti samo u TermoDom Windows Sandboxu. Otvori aplikaciju bez parametara."); Shutdown(2); return; }
    new StudioWindow(false).Show(); return;
   }
-  new LauncherWindow().Show();
+  new LauncherWindow(autoOpen:!e.Args.Contains("--launcher")).Show();
  }
 }

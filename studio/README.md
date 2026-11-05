@@ -7,19 +7,27 @@ Ovo je osobni lokalni klijent; nije usluga koja dijeli vlasnikov račun zaposlen
 
 ## Početak
 
-1. Pokreni `TermoDom-Studio-Setup-1.0.0-x64.exe` i odaberi **Instaliraj za mene**.
-2. Otvori Studio. Ako Windows Sandbox nije uključen, odaberi njegovo uključivanje
-   i potvrdi službeni Windows UAC. Spremi rad i ponovno pokreni Windows ako to traži.
-   Potrebni su Windows Pro/Enterprise/Education i hardverska virtualizacija.
-3. Odaberi **Otvori izolirani Studio**. Otvara se zaseban Microsoft Windows Sandbox
-   prozor u kojem radi nativna aplikacija. Taj vanjski prozor je vidljiv dio izolacije.
-   Na ovom vlasnikovu računalu privatni izvoz razgovora je već pripremljen. Na drugom
-   osobnom računalu prije otvaranja odaberi **Uvezi privatnu kopiju ovog razgovora**
-   i zasebno privatno preneseni JSON. Nikad ga ne objavljuj na GitHubu. Uvoz odbija
-   prepisivanje već započetog razgovora, pa se postojeći rad neće zamijeniti.
-4. **Prijavi se kroz ChatGPT** otvara službenu OpenAI prijavu u pregledniku unutar
-   Sandboxa. Ondje možeš odabrati svoj Google račun. Ne unosi lozinku ili kod u chat.
-   Ovdje postoji nova odvojena prijava; postojeća sesija iz host Codexa se ne kopira.
+1. Pokreni `TermoDom-Studio-Setup-1.0.1-x64.exe` i odaberi **Instaliraj za mene**.
+   Prečaci se stvaraju na radnoj površini i u izborniku Start. Aplikacija i alati
+   ostaju u korisničkoj mapi Programs, odvojeni od privatnih Studio podataka.
+2. **Otvori Studio** ili prečac na radnoj površini jednim pokretanjem provjerava
+   Windows Sandbox, priprema projekt i nastavlja već spremljeni razgovor.
+   Ako je Sandbox isključen, automatski se pokreće priložena aktivacija kroz
+   službeni Windows UAC. Windows Pro/Enterprise/Education i hardverska
+   virtualizacija su potrebni. Nema automatskog restarta; spremi rad i ponovno
+   pokreni računalo ako aktivacija to zatraži, zatim opet otvori isti prečac.
+   Pogreška, otkazana potvrda i potreban restart prikazuju se u pokretaču.
+3. Na ovom vlasnikovu računalu privatni izvoz razgovora već je pripremljen i
+   automatski se prepoznaje. Nema ručnog uvoza ni stvaranja praznog zamjenskog
+   razgovora. Već započeti Studio razgovor i izmijenjeni projekt se ne prepisuju.
+   Javni instalater ne prenosi privatne poruke na drugo računalo. Ondje vlasnik
+   zasebno privatno priprema `Data/Imports/current-chat.json` prije pokretanja;
+   nikad ga ne objavljuje na GitHubu ili predaje zaposlenicima.
+4. Ako Studio nema svoju spremljenu prijavu, automatski otvara službeni OpenAI
+   prozor **unutar Sandboxa**. Prvu potvrdu dovršavaš osobno, po želji preko Googlea.
+   Prijava se zatim čuva u zasebnim Studio podacima i koristi pri sljedećem
+   otvaranju. Istekla ili opozvana prijava može ponovno tražiti potvrdu. Host
+   Codex/Google prijave ne kopiraju se. Lozinku ili kod nikad ne unosi u chat.
 5. Odaberi model, razmišljanje i ponuđenu brzinu. Popis dolazi iz `model/list`;
    dostupnost, ograničenja i potrošnja ovise o računu. Fast nije zajamčen za svaki
    model i može trošiti više limita. Nema zasebnog API ključa.
@@ -136,7 +144,7 @@ Službeni izvori:
 
 Opcionalna protokolska provjera: dodaj `-- --codex=<apsolutna službena codex.exe putanja>`.
 Pokreće se samo s praznim privremenim CODEX_HOME i poznatom echo naredbom.
-`--preview` otvara jasno označen pregled bez agenta, prijave, terminala ili spremanja.
+`--launcher` otvara samo dijagnostički pokretač bez automatske aktivacije. Normalno pokretanje i `--open` automatski pripremaju nastavak. Vidljivi **× Zatvori** zatvara prozor uz provjeru nespremljenog uređivanja. `--preview` otvara jasno označen pregled bez agenta, prijave, terminala ili spremanja.
 `--inside` odbija rad izvan pripremljenog Windows Sandboxa; nije host full-access prečac.
 
 `Build.ps1` pakira pregledani `HEAD` i njegov projektni Git bundle. Prima prethodno

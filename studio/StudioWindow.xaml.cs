@@ -23,13 +23,14 @@ public partial class StudioWindow : Window
  Workspace? workspace;StudioThread? current;List<StudioThread> threads=[];ConversationImport? privateImport;
  readonly Dictionary<string,TextBlock> liveMessages=[];
  readonly HashSet<string> announced=[];
- string? currentTurn,editorPath,editorHash;bool editorDirty,loadingEditor,busy,authenticated,engineReady;
+ string? currentTurn,editorPath,editorHash;bool editorDirty,loadingEditor,busy,authenticated,engineReady,loginPending;
  readonly List<string> attachments=[];
  CancellationTokenSource? commandLifetime;
  string IndexPath=>Path.Combine(Isolation.Data,"studio-chats.json");
  public StudioWindow(bool preview)
  {
   InitializeComponent();this.preview=preview;
+  var area=SystemParameters.WorkArea;MinWidth=Math.Min(MinWidth,area.Width);MinHeight=Math.Min(MinHeight,area.Height);Width=Math.Min(Width,area.Width);Height=Math.Min(Height,area.Height);
   Loaded+=async(_,_)=>await InitializeAsync();
   Closing+=(_,e)=>{if(!CanDiscardEditor())e.Cancel=true;else{rpc.Dispose();commandLifetime?.Cancel();sessionLock?.Dispose();}};
   rpc.Notification+=(name,p)=>Dispatcher.BeginInvoke(()=>HandleNotification(name,p));
@@ -85,6 +86,7 @@ public partial class StudioWindow : Window
     if(current.ImportPending)AddMessage("STUDIO","Prenesen je sadržaj ovog razgovora. Sljedeći zadatak nastavlja s tim porukama i priloženim slikama. Izvorni Codex chat se ne sinkronizira automatski.",false);
    }
    RefreshFiles();LoadContext();UpdateActions();
+   if(!preview&&!authenticated)await BeginLoginAsync();
    if(preview&&Environment.GetCommandLineArgs().FirstOrDefault(a=>a.StartsWith("--capture=")) is {} capture)
    {
     await Task.Delay(700);UpdateLayout();
@@ -99,7 +101,7 @@ public partial class StudioWindow : Window
  }
  void UpdateActions()
  {
-  Login.IsEnabled=!preview&&engineReady&&!busy;Logout.IsEnabled=!preview&&authenticated&&!busy;
+  Login.IsEnabled=!preview&&engineReady&&!busy&&!loginPending&&!authenticated;Logout.IsEnabled=!preview&&authenticated&&!busy;
   Send.IsEnabled=!preview&&authenticated&&!busy&&Models.SelectedItem is ModelChoice;
   Stop.IsEnabled=!preview&&busy;Models.IsEnabled=Effort.IsEnabled=Speed.IsEnabled=Access.IsEnabled=!preview&&!busy;
   Editor.IsReadOnly=preview;
@@ -149,16 +151,20 @@ public partial class StudioWindow : Window
   Effort.ItemsSource=m.Efforts;Effort.SelectedItem=m.DefaultEffort;if(Effort.SelectedIndex<0&&m.Efforts.Count>0)Effort.SelectedIndex=0;
   Speed.ItemsSource=m.Speeds;Speed.SelectedIndex=m.Speeds.Count>0?0:-1;
  }
- async void Login_Click(object sender,RoutedEventArgs e)
+ void Close_Click(object sender,RoutedEventArgs e)=>Close();
+ async void Login_Click(object sender,RoutedEventArgs e)=>await BeginLoginAsync();
+ async Task BeginLoginAsync()
  {
+  if(preview||!engineReady||authenticated||loginPending)return;
+  loginPending=true;UpdateActions();
   try
   {
    var result=await rpc.CallAsync("account/login/start",new{type="chatgpt"});
    var url=result.GetProperty("authUrl").GetString()!;
-   if(!Uri.TryCreate(url,UriKind.Absolute,out var uri)||uri.Scheme!="https"||uri.Host!="auth.openai.com")throw new IOException("Neočekivana adresa službene prijave.");
+   if(!Uri.TryCreate(url,UriKind.Absolute,out var uri)||uri.Scheme!="https"||uri.Host is not("auth.openai.com" or "chatgpt.com"))throw new IOException("Neočekivana adresa službene prijave.");
    Process.Start(new ProcessStartInfo(url){UseShellExecute=true});
    Status.Text="Dovrši službenu OpenAI prijavu u pregledniku Sandboxa. Ondje možeš odabrati Google. Lozinku ili kod ne unosi u chat.";
-  }catch(Exception ex){Fail(ex);}
+  }catch(Exception ex){loginPending=false;Fail(ex);UpdateActions();}
  }
  async void Logout_Click(object sender,RoutedEventArgs e){try{await rpc.CallAsync("account/logout",new{});await RefreshAccountAsync();}catch(Exception ex){Fail(ex);}}
  async void Send_Click(object sender,RoutedEventArgs e)=>await SendAsync();
@@ -203,7 +209,7 @@ public partial class StudioWindow : Window
   try
   {
    if(method=="account/login/completed")
-   {if(p.TryGetProperty("success",out var success)&&success.ValueKind==JsonValueKind.True)await RefreshAccountAsync();else Status.Text="Prijava nije dovršena. "+Text(p,"error");}
+   {loginPending=false;if(p.TryGetProperty("success",out var success)&&success.ValueKind==JsonValueKind.True)await RefreshAccountAsync();else{Status.Text="Prijava nije dovršena. "+Text(p,"error");UpdateActions();}}
    else if(method=="item/agentMessage/delta")
    {
     var id=Text(p,"itemId");if(!liveMessages.TryGetValue(id,out var message)){message=AddMessage("CODEX","",false);liveMessages[id]=message;}message.Text+=Text(p,"delta");ChatScroll.ScrollToEnd();

@@ -25,6 +25,29 @@ try
  foreach(var feature in new[]{"ClipboardRedirection","AudioInput","VideoInput","PrinterRedirection"})Check(config.Root.Element(feature)!.Value=="Disable",feature+" disabled");
  Check(config.Root.Element("ProtectedClient")!.Value=="Enable","protected client enabled");
  Check(!Isolation.IsWorker,"ordinary host session cannot launch agent");
+ var boot=DateTimeOffset.Parse("2026-11-06T07:00:00Z");
+ Check(SandboxLaunch.Classify(true,1,boot).CanLaunch,"enabled Sandbox executable is ready to launch");
+ Check(!SandboxLaunch.Classify(false,2,boot).CanLaunch,"disabled Windows feature cannot claim launch readiness");
+ Check(SandboxLaunch.Classify(false,2,boot).State.ToString()=="Disabled","disabled Windows feature offers setup instead of launch");
+ Check(!SandboxLaunch.Classify(false,0,boot).CanLaunch,"unavailable Windows feature cannot launch agent on host");
+ Check(!SandboxLaunch.Classify(false,null,boot).CanLaunch,"unavailable diagnostics do not enable host fallback");
+ var pendingSetup=new SandboxEnableResult(true,true,"Synthetic setup result",boot.AddMinutes(5));
+ Check(SandboxLaunch.Classify(true,1,boot,pendingSetup).State.ToString()=="RestartRequired","setup requiring reboot overrides an executable that already exists");
+ Check(!SandboxLaunch.Classify(true,1,boot,pendingSetup).CanLaunch,"pending Windows restart blocks startup");
+ Check(SandboxLaunch.Classify(true,1,boot.AddHours(1),pendingSetup).CanLaunch,"completed reboot clears stale setup restart requirement");
+ Check(!SandboxLaunch.Classify(true,1,null,pendingSetup).CanLaunch,"unknown boot timestamp cannot silently clear required restart");
+ var enableDirectory=Path.Combine(root,"Studio & Tools");Directory.CreateDirectory(enableDirectory);
+ File.WriteAllText(Path.Combine(enableDirectory,"Enable-Sandbox.ps1"),"# synthetic command construction fixture; never executed");
+ var setupResult=Path.Combine(root,"setup result.json");
+ var enableStart=SandboxLaunch.CreateEnableStartInfo(enableDirectory,setupResult);
+ Check(Path.IsPathFullyQualified(enableStart.FileName)&&enableStart.UseShellExecute&&enableStart.Verb=="runas","Windows feature setup uses an absolute executable and official UAC elevation");
+ Check(enableStart.ArgumentList.Contains("-ExecutionPolicy")&&enableStart.ArgumentList.Contains("Bypass")&&enableStart.ArgumentList.Contains("-NoProfile"),"trusted setup avoids profile and execution policy startup failures");
+ Check(enableStart.ArgumentList.Contains(Path.Combine(enableDirectory,"Enable-Sandbox.ps1"))&&enableStart.ArgumentList.Contains(setupResult),"setup paths with spaces and ampersands remain separate arguments");
+ var configPath=Path.Combine(root,"Studio & Work.wsb");
+ File.WriteAllText(configPath,config.ToString());
+ var sandboxStart=SandboxLaunch.CreateSandboxStartInfo(configPath);
+ Check(Path.IsPathFullyQualified(sandboxStart.FileName)&&Path.GetFileName(sandboxStart.FileName).Equals("WindowsSandbox.exe",StringComparison.OrdinalIgnoreCase),"launch addresses Windows Sandbox explicitly instead of a file association");
+ Check(sandboxStart.ArgumentList.SequenceEqual(new[]{configPath}),"Sandbox configuration path stays a single argument");
  var zip=Path.Combine(root,"bad.zip");using(var z=ZipFile.Open(zip,ZipArchiveMode.Create)){using var w=new StreamWriter(z.CreateEntry("../escape.txt").Open());w.Write("x");}
  var dest=Path.Combine(root,"extract");Directory.CreateDirectory(dest);Refuses(()=>Isolation.ExtractSeed(zip,dest),"archive traversal rejected");
  Check(!File.Exists(Path.Combine(root,"escape.txt")),"archive did not write outside destination");
@@ -37,6 +60,10 @@ try
  var imported=ConversationImport.Load(importFile);Check(imported.Messages.Count==2&&imported.ToItems().Length==2,"visible project messages retain user and assistant roles");
  File.WriteAllText(importFile,"""{"schemaVersion":1,"title":"Project","sourceThreadId":"synthetic","messages":[{"role":"system","content":[{"type":"input_text","text":"not a visible message"}]}]}""");
  Refuses(()=>ConversationImport.Load(importFile),"hidden system/developer instructions cannot enter private chat import");
+ File.WriteAllText(importFile,"""{"schemaVersion":1,"title":"Project","sourceThreadId":"synthetic","messages":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.invalid/private-image.jpg"}]}]}""");
+ Refuses(()=>ConversationImport.Load(importFile),"automatic conversation load cannot fetch remote images");
+ File.WriteAllText(importFile,"""{"schemaVersion":1,"title":"Project","sourceThreadId":"synthetic","messages":[{"role":"assistant","content":[{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}]}]}""");
+ Refuses(()=>ConversationImport.Load(importFile),"only user-attached images enter transferred conversation");
  if(args.FirstOrDefault(a=>a.StartsWith("--codex=")) is {} arg)
  {
   using var rpc=new RpcClient();var home=Path.Combine(root,"empty-home");await rpc.StartAsync(arg[8..],project,home,probe:true);
