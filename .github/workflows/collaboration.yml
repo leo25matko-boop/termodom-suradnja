@@ -34,6 +34,13 @@ jobs:
       - name: Build and test native development app with fixtures
         shell: pwsh
         run: ./scripts/team/Dev.ps1 -Action Test
+      - name: Build isolated personal Studio and test boundaries without owner credentials
+        shell: pwsh
+        run: |
+          dotnet build studio/TermoDom.Studio.csproj
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet run --project studio/tests/Studio.Tests.csproj
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
   android-unit:
     name: Android testovi
     runs-on: ubuntu-24.04
@@ -59,3 +66,36 @@ jobs:
           persist-credentials: false
       - name: Reject credential files and common real token formats
         run: python3 scripts/team/check-source.py
+  studio-installer:
+    name: Studio instalater
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d
+        with:
+          dotnet-version: '8.0.x'
+      - name: Download verified official Codex and Git tooling
+        shell: pwsh
+        run: ./studio/Download-Tools.ps1 -Destination "$env:RUNNER_TEMP/studio-tools"
+      - name: Test real protocol with synthetic conversation and no owner login
+        shell: pwsh
+        run: |
+          dotnet run --project studio/tests/Studio.Tests.csproj -- "--codex=$env:RUNNER_TEMP/studio-tools/codex/vendor/x86_64-pc-windows-msvc/bin/codex.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build personal Studio installer from reviewed project source
+        shell: pwsh
+        run: |
+          ./studio/Build.ps1 -CodexPackageDirectory "$env:RUNNER_TEMP/studio-tools/codex" -GitDirectory "$env:RUNNER_TEMP/studio-tools/git" -ToolManifest "$pwd/studio/tool-manifest.json" -OutputDirectory "$env:RUNNER_TEMP/studio-package"
+          Get-FileHash "$env:RUNNER_TEMP/studio-package/installer/TermoDom-Studio-Setup-1.1.2-x64.exe" -Algorithm SHA256 | Format-List | Out-File "$env:RUNNER_TEMP/studio-package/installer/SHA256.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TermoDom-Studio-Windows-installer
+          path: |
+            ${{ runner.temp }}/studio-package/installer/TermoDom-Studio-Setup-1.1.2-x64.exe
+            ${{ runner.temp }}/studio-package/installer/SHA256.txt
+          retention-days: 7
+          if-no-files-found: error

@@ -76,3 +76,21 @@ Automatska ZIP provjera postojećeg Windows izdanja čita originalni repozitorij
 Službena dokumentacija:
 https://learn.chatgpt.com/docs/use-chatgpt#share-a-read-only-snapshot-of-a-codex-thread
 https://learn.chatgpt.com/docs/projects
+
+## Osobni TermoDom Studio
+
+`studio/` sadrži novi nativni WPF osobni klijent službenog Codex app-servera.
+Koristi zaseban Windows Sandbox, samo pregledani projekt i vlastiti CODEX_HOME.
+Vlasnik se prijavljuje kroz službeni OpenAI prozor unutar tog Sandboxa; prethodna
+ChatGPT/Codex povijest drugih projekata i host prijave nisu preneseni. Vlasnik je
+naknadno zatražio prijenos samo ovog izvornog projektnog razgovora: njegov privatni
+izvoz ostaje u Studio podacima izvan javnog repozitorija i instalatera. Modeli,
+razmišljanje i brzine dolaze iz stvarnog model/list odgovora. Full access vrijedi
+samo unutar vanjske Windows izolacije. Detalji, upute i točna ograničenja provjere
+su u `studio/README.md`. Ovo nije način dijeljenja vlasnikova računa zaposlenicima.
+Studio 1.1 dodaje projektne i Git radnje, pregled koda u istom razgovoru, sažimanje,
+pretragu i privatni izvoz, pohranu izbora modela, skills/MCP postavke te rezervnu
+službenu prijavu kodom. GitHub PR i novi repozitorij otvaraju službene obrasce;
+ovlasti za GitHub i dodatne MCP usluge zahtijevaju zasebno korisničko povezivanje.
+Sve funkcije službenog Codex desktop klijenta nisu prenesene. Izolacija i
+ograničenje na jedan projekt/razgovor ostaju isti.
