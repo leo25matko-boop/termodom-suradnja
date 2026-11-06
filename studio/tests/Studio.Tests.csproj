@@ -1,4 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
  <ItemGroup><Compile Include="../Isolation.cs" Link="Isolation.cs"/><Compile Include="../SandboxLaunch.cs" Link="SandboxLaunch.cs"/><Compile Include="../Workspace.cs" Link="Workspace.cs"/><Compile Include="../RpcClient.cs" Link="RpcClient.cs"/><Compile Include="../ConversationImport.cs" Link="ConversationImport.cs"/><Compile Include="../StudioPreferences.cs" Link="StudioPreferences.cs"/><Compile Include="../BrowserLauncher.cs" Link="BrowserLauncher.cs"/></ItemGroup>
-</Project>
+ <ItemGroup><Compile Include="../StudioDatabaseStorage.cs" Link="StudioDatabaseStorage.cs"/></ItemGroup>
+ </Project>

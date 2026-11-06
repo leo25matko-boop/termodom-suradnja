@@ -28,4 +28,4 @@ if(Test-Path -LiteralPath $payload){throw 'Use a fresh output directory; an exis
 [IO.Compression.ZipFile]::CreateFromDirectory($app,$payload,[IO.Compression.CompressionLevel]::Optimal,$false)
 & dotnet publish (Join-Path $PSScriptRoot 'installer/Studio.Setup.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true "-p:PayloadPath=$payload" -o (Join-Path $out 'installer')
 if($LASTEXITCODE){throw 'Installer publish failed.'}
-Write-Output (Join-Path $out 'installer/TermoDom-Studio-Setup-1.1.1-x64.exe')
+Write-Output (Join-Path $out 'installer/TermoDom-Studio-Setup-1.1.2-x64.exe')

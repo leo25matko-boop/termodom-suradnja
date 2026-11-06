@@ -89,6 +89,7 @@ try
  Refuses(()=>StudioPreferences.Load(preferenceFile),"unsupported preference schema cannot silently enable old access settings");
  File.WriteAllText(preferenceFile,"""{"ModelId":null}""");
  Refuses(()=>StudioPreferences.Load(preferenceFile),"invalid preference content is rejected before model selection");
+ StudioDatabaseStorageChecks.Run(root,Check,Refuses);
  if(args.FirstOrDefault(a=>a.StartsWith("--codex=")) is {} arg)
  {
   using var rpc=new RpcClient();var home=Path.Combine(root,"empty-home");await rpc.StartAsync(arg[8..],project,home,probe:true);

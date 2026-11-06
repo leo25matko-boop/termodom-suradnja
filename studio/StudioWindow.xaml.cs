@@ -32,7 +32,7 @@ public partial class StudioWindow : Window
   InitializeComponent();this.preview=preview;
   var area=SystemParameters.WorkArea;MinWidth=Math.Min(MinWidth,area.Width);MinHeight=Math.Min(MinHeight,area.Height);Width=Math.Min(Width,area.Width);Height=Math.Min(Height,area.Height);
   Loaded+=async(_,_)=>await InitializeAsync();
-  Closing+=(_,e)=>{if(!CanDiscardEditor())e.Cancel=true;else{shuttingDown=true;rpc.Dispose();commandLifetime?.Cancel();sessionLock?.Dispose();}};
+  Closing+=(_,e)=>{if(!CanDiscardEditor())e.Cancel=true;else{shuttingDown=true;rpc.Dispose();if(rpc.DatabaseSaveError is {} error)MessageBox.Show(this,error,"TermoDom Studio — spremanje stanja");commandLifetime?.Cancel();sessionLock?.Dispose();}};
   rpc.Notification+=(name,p)=>Dispatcher.BeginInvoke(()=>HandleNotification(name,p));
   rpc.Disconnected+=message=>Dispatcher.BeginInvoke(()=>{authenticated=false;engineReady=false;loginPending=false;pendingLoginId=null;busy=false;Connection.Text=message;UpdateActions();});
   rpc.ServerRequest+=HandleRequestAsync;

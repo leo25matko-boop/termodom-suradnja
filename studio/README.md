@@ -7,7 +7,7 @@ Ovo je osobni lokalni klijent; nije usluga koja dijeli vlasnikov račun zaposlen
 
 ## Početak
 
-1. Pokreni `TermoDom-Studio-Setup-1.1.1-x64.exe` i odaberi **Instaliraj za mene**.
+1. Pokreni `TermoDom-Studio-Setup-1.1.2-x64.exe` i odaberi **Instaliraj za mene**.
    Prečaci se stvaraju na radnoj površini i u izborniku Start. Aplikacija i alati
    ostaju u korisničkoj mapi Programs, odvojeni od privatnih Studio podataka.
 2. **Otvori Studio** ili prečac na radnoj površini jednim pokretanjem provjerava
@@ -175,6 +175,9 @@ Priprema potpisanog službenog Firefoxa provjerena je u guestu. Dovršena osobna
 OAuth prijava, prvi AI zadatak i nastavak stvarnog AI razgovora nakon restarta
 još nisu potvrđeni. Dodatni sintetički PowerShell protokolski probe u guestu imao
 je timeout; njegovo potvrđivanje SQLite zaglavlja nije dokaz ispravnosti povijesti.
+Naknadna stvarna .NET provjera potvrdila je uzrok prekida: SQLite se inicijalizira
+na VSMB mapiranju, ali ponovno otvaranje iste baze prekida Codex proces. Isti
+Studio profil s bazom na lokalnom guest disku uspješno se pokreće više puta.
 Paket do dovršavanja tih koraka treba smatrati
 izgrađenim kandidatom za osobno isprobavanje, a ne potpuno provjerenom zamjenom Codexa.
 Studio nije potpuna kopija svih vlasničkih funkcija Codex desktop aplikacije:
@@ -186,6 +189,15 @@ agentu otvorila pristup drugim privatnim izvorima preko povezanog računa. Git r
 ostaje isti; dopuštenje za push/PR nije automatski preneseno iz host GitHub prijave.
 Za zajamčeni pristup samo jednom repozitoriju treba zaseban projektno ograničen
 razvojni pristup. Ne prijavljivati široki osobni GitHub token u ovo okruženje.
+
+SQLite tijekom rada koristi samo lokalnu mapu unutar Sandboxa. Pri pokretanju
+učitava se posljednja potpuna privatna kopija baze; pri zatvaranju Studija najprije
+se zaustavlja Codex, zatim se sprema nova generacija kopije. Stare baze ostaju
+sačuvane. Razgovor, privici i vlastita Studio prijava i dalje se spremaju odvojeno
+u postojeću privatnu Data mapu; ne kopiraju se host prijave niti drugi razgovori.
+Zatvori Studio pomoću **× Zatvori** prije zatvaranja cijelog Sandboxa kako bi se
+spremilo posljednje stanje baze. Naglo gašenje VM-a može ostaviti prethodnu
+kopiju metapodataka; ono nije isto što i uredno zatvaranje aplikacije.
 
 Službeni izvori:
 - https://learn.chatgpt.com/docs/app-server

@@ -14,11 +14,11 @@ public static class Program
  {
   if(args.Contains("--install-current-user"))
   {
-   try{var exe=Install();CreateShortcuts(exe);Console.WriteLine("TermoDom Studio 1.1.1 installed for current user with Desktop and Start shortcuts.");}
+   try{var exe=Install();CreateShortcuts(exe);Console.WriteLine("TermoDom Studio 1.1.2 installed for current user with Desktop and Start shortcuts.");}
    catch(Exception ex){Console.Error.WriteLine("Installation failed: "+ex.Message);Environment.ExitCode=1;}
    return;
   }
-  var app=new Application();var window=new Window{Title="TermoDom Studio 1.1.1 · Instalacija",Width=660,Height=520,MaxHeight=SystemParameters.WorkArea.Height,MaxWidth=SystemParameters.WorkArea.Width,WindowStyle=WindowStyle.SingleBorderWindow,ResizeMode=ResizeMode.CanMinimize,Background=new SolidColorBrush(Color.FromRgb(12,21,29)),Foreground=Brushes.White,FontFamily=new FontFamily("Segoe UI"),WindowStartupLocation=WindowStartupLocation.CenterScreen};
+  var app=new Application();var window=new Window{Title="TermoDom Studio 1.1.2 · Instalacija",Width=660,Height=520,MaxHeight=SystemParameters.WorkArea.Height,MaxWidth=SystemParameters.WorkArea.Width,WindowStyle=WindowStyle.SingleBorderWindow,ResizeMode=ResizeMode.CanMinimize,Background=new SolidColorBrush(Color.FromRgb(12,21,29)),Foreground=Brushes.White,FontFamily=new FontFamily("Segoe UI"),WindowStartupLocation=WindowStartupLocation.CenterScreen};
   var panel=new StackPanel{Margin=new Thickness(30)};window.Content=new ScrollViewer{Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
   panel.Children.Add(new TextBlock{Text="TERMODOM  /  STUDIO",Foreground=Brushes.Turquoise,FontSize=14});
   panel.Children.Add(new TextBlock{Text="Osobni Codex za TermoDom",FontSize=27,Margin=new Thickness(0,24,0,16)});
