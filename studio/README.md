@@ -111,6 +111,12 @@ Zadržava samo izdvojenu Git povijest TermoDoma i izvorni kod Studija. Git konfi
 i vjerodajnice s host računala ne ulaze u bundle. Kopija ima `upstream` prema javnom
 `termodom-suradnja`, ali nema automatski push,
 reset, pull ili produkcijsku objavu. Privatni GitHub pristup s hosta se ne nasljeđuje.
+Mapirani projekt zadržava host SID; bootstrap zato dopušta Git ownership provjeru
+isključivo za `C:/TermoDom/Project` u vlastitom process treeu. Ne koristi `*` i ne
+mijenja host Git konfiguraciju. Djelomično započeti Git bez HEAD-a dovršava se
+pregledanim bundleom, uz mixed reset koji čuva radne datoteke. Pull odbija i
+prepisivanje ignoriranih datoteka. Generička `.codex/config.toml` ostaje u Git
+povijesti, a njezino namjerno izostavljanje iz runtime ZIP-a označeno je skip-worktree.
 
 Datoteke u uredu i doma razmjenjuj kroz javni GitHub fork/PR uz svoje službene
 GitHub prijave, ne kopiranjem Studijeva Data direktorija. Za objavu agent treba

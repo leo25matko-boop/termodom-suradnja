@@ -9,6 +9,11 @@ try {
   $env:DOTNET_ROOT='C:\TermoDom\Data\Tools\dotnet'
   $env:GIT_CONFIG_GLOBAL='C:\TermoDom\Data\gitconfig'
   $env:GIT_CONFIG_NOSYSTEM='1'
+  # VSMB files keep the host owner's SID. Trust only this reviewed mapped repo
+  # for this process tree; do not disable Git ownership checks for other paths.
+  $env:GIT_CONFIG_COUNT='1'
+  $env:GIT_CONFIG_KEY_0='safe.directory'
+  $env:GIT_CONFIG_VALUE_0='C:/TermoDom/Project'
   $env:PATH="C:\TermoDom\App\Tools\git\cmd;C:\TermoDom\Data\Tools\dotnet;$env:PATH"
   foreach($name in 'OPENAI_API_KEY','OPENAI_BASE_URL','CHATGPT_API_KEY','GH_TOKEN','GITHUB_TOKEN','GIT_ASKPASS','SSH_AUTH_SOCK') {Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue}
   New-Item -ItemType Directory -Force $env:CODEX_HOME | Out-Null
@@ -31,14 +36,23 @@ plugins = false
   if (-not (Test-Path -LiteralPath C:\TermoDom\Project\.git)) {
     & C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project init -b studio
     if($LASTEXITCODE){throw 'Cannot initialize isolated Git project.'}
+  }
+  & C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project rev-parse --verify --quiet HEAD | Out-Null
+  if ($LASTEXITCODE -ne 0) {
     # Bundle contains only the reviewed history of this single public project.
     # Mixed reset sets the initial index, leaving all existing source files intact.
     & C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project fetch --no-tags C:\TermoDom\App\Project.bundle HEAD
     if($LASTEXITCODE){throw 'Cannot import reviewed project history.'}
     & C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project reset --mixed FETCH_HEAD
     if($LASTEXITCODE){throw 'Cannot attach reviewed initial source history.'}
-    & C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project remote add upstream https://github.com/leo25matko-boop/termodom-suradnja.git
-    & C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project remote add origin https://github.com/leo25matko-boop/termodom-suradnja.git
+    # The archive deliberately omits this generic host/team policy from runtime.
+    # Keep it in Git history without presenting its intentional absence as a deletion.
+    & C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project update-index --skip-worktree -- .codex/config.toml
+    if($LASTEXITCODE){throw 'Cannot preserve the reviewed project policy in the initial index.'}
+    $remotes=@(& C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project remote)
+    foreach($name in @('upstream','origin')) {
+      if ($remotes -notcontains $name) {& C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project remote add $name https://github.com/leo25matko-boop/termodom-suradnja.git}
+    }
   }
   # A fresh Windows Sandbox may not contain any HTTPS handler. Prepare a signed
   # verified official browser in the guest before the app attempts OAuth.
