@@ -172,7 +172,8 @@ public partial class StudioWindow
   {
    if((await CheckedGitAsync(token,"status","--porcelain=v1")).Length>0)throw new IOException("Projekt ima lokalne ili nove datoteke. Spremi ih u commit prije povlačenja promjena; ništa nije prepisano.");
    await CheckedGitAsync(token,"check-ref-format","--branch",branch);ShowWorkspaceTool(2);
-   await CheckedGitAsync(token,"pull","--ff-only","--no-rebase","--no-overwrite-ignore","origin",branch);RefreshFiles();LoadContext();
+   await CheckedGitAsync(token,"fetch","--no-tags","origin",branch);
+   await CheckedGitAsync(token,"merge","--ff-only","--no-overwrite-ignore","FETCH_HEAD");RefreshFiles();LoadContext();
    if(editorPath!=null)
    {
     if(File.Exists(workspace!.Resolve(editorPath)))OpenEditor(editorPath);
