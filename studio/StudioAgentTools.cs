@@ -127,7 +127,7 @@ public partial class StudioWindow
    if (servers.SelectedItem is not AgentMcp server) throw new IOException("Prvo odaberi konfigurirani MCP poslužitelj.");
    var result = await rpc.CallAsync("mcpServer/oauth/login", new { name = server.Name, threadId = string.IsNullOrEmpty(current?.Id) ? null : current.Id });
    if (!Uri.TryCreate(Text(result, "authorizationUrl"), UriKind.Absolute, out var url) || (url.Scheme != "https" && !(url.IsLoopback && url.Scheme == "http")) || url.UserInfo.Length != 0) throw new IOException("MCP nije vratio podržanu adresu službene prijave.");
-   Process.Start(new ProcessStartInfo(url.AbsoluteUri) { UseShellExecute = true }); note.Text = "Dovrši prijavu u pregledniku Sandboxa. Ovdje se ne prikazuju i ne spremaju lozinke ili kodovi.";
+   BrowserLauncher.Open(url.AbsoluteUri); note.Text = "Dovrši prijavu u pregledniku Sandboxa. Ovdje se ne prikazuju i ne spremaju lozinke ili kodovi.";
   });
   addSkill.Click += async (_, _) => await ChangeAsync(async () =>
   {

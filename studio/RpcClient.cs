@@ -28,7 +28,7 @@ public sealed class RpcClient : IDisposable
   _=ReadLoopAsync(process.StandardOutput);
   // Never persist stderr, protocol messages, OAuth URLs or auth/account responses to logs.
   _=DrainErrorAsync(process.StandardError);
-  await CallAsync("initialize",new{clientInfo=new{name="termodom_studio",title="TermoDom Studio",version="1.1.0"},capabilities=new{experimentalApi=true}});
+  await CallAsync("initialize",new{clientInfo=new{name="termodom_studio",title="TermoDom Studio",version="1.1.1"},capabilities=new{experimentalApi=true}});
   await WriteAsync(new{method="initialized",@params=new{}});
  }
  async Task DrainErrorAsync(StreamReader reader){try{while(await reader.ReadLineAsync(lifetime.Token)!=null){}}catch(OperationCanceledException){}catch(IOException){}}

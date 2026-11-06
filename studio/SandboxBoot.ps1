@@ -40,6 +40,9 @@ plugins = false
     & C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project remote add upstream https://github.com/leo25matko-boop/termodom-suradnja.git
     & C:\TermoDom\App\Tools\git\cmd\git.exe -C C:\TermoDom\Project remote add origin https://github.com/leo25matko-boop/termodom-suradnja.git
   }
+  # A fresh Windows Sandbox may not contain any HTTPS handler. Prepare a signed
+  # verified official browser in the guest before the app attempts OAuth.
+  & C:\TermoDom\App\Prepare-Browser.ps1
   @{kind='TermoDom Windows Sandbox';started=(Get-Date).ToUniversalTime().ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath C:\TermoDom\worker-ready.json
   Start-Process -FilePath C:\TermoDom\App\TermoDomStudio.exe -ArgumentList '--inside' -WorkingDirectory C:\TermoDom\Project
 } catch {

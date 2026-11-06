@@ -7,7 +7,7 @@ Ovo je osobni lokalni klijent; nije usluga koja dijeli vlasnikov račun zaposlen
 
 ## Početak
 
-1. Pokreni `TermoDom-Studio-Setup-1.1.0-x64.exe` i odaberi **Instaliraj za mene**.
+1. Pokreni `TermoDom-Studio-Setup-1.1.1-x64.exe` i odaberi **Instaliraj za mene**.
    Prečaci se stvaraju na radnoj površini i u izborniku Start. Aplikacija i alati
    ostaju u korisničkoj mapi Programs, odvojeni od privatnih Studio podataka.
 2. **Otvori Studio** ili prečac na radnoj površini jednim pokretanjem provjerava
@@ -28,6 +28,14 @@ Ovo je osobni lokalni klijent; nije usluga koja dijeli vlasnikov račun zaposlen
    Prijava se zatim čuva u zasebnim Studio podacima i koristi pri sljedećem
    otvaranju. Istekla ili opozvana prijava može ponovno tražiti potvrdu. Host
    Codex/Google prijave ne kopiraju se. Lozinku ili kod nikad ne unosi u chat.
+   Čiste Windows Sandbox slike mogu doći bez preglednika. Bootstrap zato jednom
+   preuzima službeni Firefox instalater iz Mozillina manifesta, provjerava
+   SHA512 i Mozillin digitalni potpis te ga instalira samo u guestu,
+   bez restarta. Paket se čuva u `Data/Tools/Browser` za sljedeća pokretanja.
+   Prvo preuzimanje može potrajati. Studio otvara pripremljeni preglednik
+   izravno, bez host profila ili dodatne Microsoft/Firefox prijave. GitHub i MCP
+   poveznice koriste isti preglednik. Postojeći valjano potpisani Edge također
+   se može koristiti. Prijava ne ovisi o Windowsovu zadanom HTTPS handleru.
 5. Odaberi model, razmišljanje i ponuđenu brzinu. Popis dolazi iz `model/list`;
    dostupnost, ograničenja i potrošnja ovise o računu. Fast nije zajamčen za svaki
    model i može trošiti više limita. Nema zasebnog API ključa.
@@ -153,9 +161,15 @@ Build i protokolske lokalne provjere obuhvaćaju stvarni Codex 0.166.0 initializ
 prazan odvojeni account/read, model/list, command/exec, uvoz sintetičkih poruka i
 nastavak uvezenog razgovora kroz stdio. Te provjere
 ne pozivaju model, ne prijavljuju vlasnika i nisu dokaz izolacije živog Sandboxa.
-Aktivacija Sandboxa potvrđena je u lokalnoj Windows pripremi; Windows traži restart.
-Potrebno je završiti ponovno pokretanje, službenu prijavu, prvi model zadatak i nastavak razgovora nakon restarta
-i praktičnu provjeru nedostupnosti host mapa. Paket do tada treba smatrati
+Stvarni Windows Sandbox pokrenut je nakon aktivacije i restarta. Pripremljeni
+razgovor učitan je, a engine je došao do službene prijave. Provjereni su nedostupnost
+host Codex/projektnih putanja samo provjerom postojanja, zabrana pisanja u app
+mapu te pisanje i čitanje vlastitih testnih datoteka u projektnoj i Data mapi.
+Priprema potpisanog službenog Firefoxa provjerena je u guestu. Dovršena osobna
+OAuth prijava, prvi AI zadatak i nastavak stvarnog AI razgovora nakon restarta
+još nisu potvrđeni. Dodatni sintetički PowerShell protokolski probe u guestu imao
+je timeout; njegovo potvrđivanje SQLite zaglavlja nije dokaz ispravnosti povijesti.
+Paket do dovršavanja tih koraka treba smatrati
 izgrađenim kandidatom za osobno isprobavanje, a ne potpuno provjerenom zamjenom Codexa.
 Studio nije potpuna kopija svih vlasničkih funkcija Codex desktop aplikacije:
 postojeći konektori, sve ekstenzije, koordinacija drugih chatova, automacije i

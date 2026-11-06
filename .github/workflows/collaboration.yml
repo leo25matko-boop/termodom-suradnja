@@ -90,12 +90,12 @@ jobs:
         shell: pwsh
         run: |
           ./studio/Build.ps1 -CodexPackageDirectory "$env:RUNNER_TEMP/studio-tools/codex" -GitDirectory "$env:RUNNER_TEMP/studio-tools/git" -ToolManifest "$pwd/studio/tool-manifest.json" -OutputDirectory "$env:RUNNER_TEMP/studio-package"
-          Get-FileHash "$env:RUNNER_TEMP/studio-package/installer/TermoDom-Studio-Setup-1.1.0-x64.exe" -Algorithm SHA256 | Format-List | Out-File "$env:RUNNER_TEMP/studio-package/installer/SHA256.txt"
+          Get-FileHash "$env:RUNNER_TEMP/studio-package/installer/TermoDom-Studio-Setup-1.1.1-x64.exe" -Algorithm SHA256 | Format-List | Out-File "$env:RUNNER_TEMP/studio-package/installer/SHA256.txt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: TermoDom-Studio-Windows-installer
           path: |
-            ${{ runner.temp }}/studio-package/installer/TermoDom-Studio-Setup-1.1.0-x64.exe
+            ${{ runner.temp }}/studio-package/installer/TermoDom-Studio-Setup-1.1.1-x64.exe
             ${{ runner.temp }}/studio-package/installer/SHA256.txt
           retention-days: 7
           if-no-files-found: error

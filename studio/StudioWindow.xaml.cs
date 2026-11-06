@@ -285,7 +285,7 @@ public partial class StudioWindow : Window
  void UpdateConversationTitle(){ConversationTitle.Text=current?.Label??"Modernizuj aplikaciju za grijanje";}
  void SaveThreads(){if(preview)return;var temp=IndexPath+".tmp";File.WriteAllText(temp,JsonSerializer.Serialize(threads));File.Move(temp,IndexPath,true);}
  void ToggleTools_Click(object sender,RoutedEventArgs e){var show=ToolPane.Visibility!=Visibility.Visible;ToolPane.Visibility=show?Visibility.Visible:Visibility.Collapsed;ToolsColumn.Width=new GridLength(show?430:0);}
- void Repository_Click(object sender,RoutedEventArgs e)=>Process.Start(new ProcessStartInfo("https://github.com/leo25matko-boop/termodom-suradnja"){UseShellExecute=true});
+ void Repository_Click(object sender,RoutedEventArgs e){try{BrowserLauncher.Open("https://github.com/leo25matko-boop/termodom-suradnja");}catch(Exception ex){Fail(ex);}}
  void Attach_Click(object sender,RoutedEventArgs e)
  {
   if(preview||workspace==null)return;

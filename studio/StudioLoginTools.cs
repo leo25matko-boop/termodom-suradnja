@@ -23,7 +23,7 @@ public partial class StudioWindow
    var url=Text(result,device?"verificationUrl":"authUrl");
    if(!Uri.TryCreate(url,UriKind.Absolute,out var uri)||uri.Scheme!="https"||!uri.IsDefaultPort||uri.UserInfo.Length!=0||uri.Host is not("auth.openai.com" or "chatgpt.com"))throw new IOException("Neočekivana adresa službene prijave.");
    if(device)ShowDeviceLogin(url,Text(result,"userCode"));
-   Process.Start(new ProcessStartInfo(url){UseShellExecute=true});
+   BrowserLauncher.Open(url);
    Status.Text=device?"Službena prijava kodom je otvorena. Ako račun ne dopušta ovaj način, koristi običnu prijavu kroz ChatGPT.":"Dovrši službenu OpenAI prijavu u pregledniku Sandboxa. Možeš odabrati Google. Ako povratak iz preglednika ne radi, odaberi Agent → Rezervna službena prijava kodom.";
   }
   catch(Exception ex){loginPending=false;Status.Text="Prijava nije pokrenuta: "+ex.Message+". Ponovi prijavu ili odaberi prijavu kodom u izborniku Agent.";}

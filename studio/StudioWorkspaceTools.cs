@@ -229,12 +229,12 @@ public partial class StudioWindow
   if(!match.Success)throw new IOException("Origin nije prepoznatljiva GitHub adresa bez ugrađenih vjerodajnica. Uredi projektni remote prije pripreme pull requesta.");
   var branch=await CheckedGitAsync(token,"branch","--show-current");if(branch.Length==0)throw new IOException("Za pull request prvo otvori radnu granu.");
   var url="https://github.com/"+match.Groups[1].Value+"/"+match.Groups[2].Value+"/compare/mail..."+Uri.EscapeDataString(branch)+"?expand=1";
-  Process.Start(new ProcessStartInfo(url){UseShellExecute=true});Status.Text="Otvoren je službeni GitHub obrazac za pregled i predaju pull requesta. Ništa nije poslano automatski.";
+  BrowserLauncher.Open(url);Status.Text="Otvoren je službeni GitHub obrazac za pregled i predaju pull requesta. Ništa nije poslano automatski.";
  });
 
  void NewRepository_Click(object sender,RoutedEventArgs e)
  {
   if(!WorkspaceActionAllowed())return;
-  try{Process.Start(new ProcessStartInfo("https://github.com/new"){UseShellExecute=true});Status.Text="Otvoren je službeni GitHub obrazac za novi repozitorij. Postojeći projekt i remote ostaju isti dok ih sam ne promijeniš.";}catch(Exception ex){Fail(ex);}
+  try{BrowserLauncher.Open("https://github.com/new");Status.Text="Otvoren je službeni GitHub obrazac za novi repozitorij. Postojeći projekt i remote ostaju isti dok ih sam ne promijeniš.";}catch(Exception ex){Fail(ex);}
  }
 }

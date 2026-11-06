@@ -48,6 +48,17 @@ try
  var sandboxStart=SandboxLaunch.CreateSandboxStartInfo(configPath);
  Check(Path.IsPathFullyQualified(sandboxStart.FileName)&&Path.GetFileName(sandboxStart.FileName).Equals("WindowsSandbox.exe",StringComparison.OrdinalIgnoreCase),"launch addresses Windows Sandbox explicitly instead of a file association");
  Check(sandboxStart.ArgumentList.SequenceEqual(new[]{configPath}),"Sandbox configuration path stays a single argument");
+ Check(BrowserLauncher.ValidateAddress("https://auth.openai.com/authorize?state=synthetic&scope=openid").Scheme=="https","official browser login supports normal HTTPS addresses");
+ Check(BrowserLauncher.ValidateAddress("http://localhost:1455/auth/callback").IsLoopback,"local OAuth callback remains supported");
+ Refuses(()=>BrowserLauncher.ValidateAddress("file:///C:/private.txt"),"browser refuses local file navigation from tool URLs");
+ Refuses(()=>BrowserLauncher.ValidateAddress("javascript:alert(1)"),"browser refuses executable URL schemes");
+ Refuses(()=>BrowserLauncher.ValidateAddress("http://example.invalid/signin"),"browser refuses remote cleartext login URLs");
+ Refuses(()=>BrowserLauncher.ValidateAddress("https://user:password@example.invalid"),"browser refuses credentials embedded in URLs");
+ var browserStart=BrowserLauncher.CreateGuestStartInfo(@"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe","https://auth.openai.com/authorize?state=synthetic&scope=openid");
+ Check(!browserStart.UseShellExecute&&browserStart.ArgumentList.Count==3&&browserStart.ArgumentList.Last().Contains("state=synthetic&scope=openid"),"guest login explicitly launches a browser with one intact URL argument");
+ Check(!browserStart.ArgumentList.Contains("--no-sandbox")&&!browserStart.ArgumentList.Contains("--disable-web-security"),"browser startup keeps Chromium security boundaries enabled");
+ var firefoxStart=BrowserLauncher.CreateGuestStartInfo(@"C:\Program Files\Mozilla Firefox\firefox.exe","https://auth.openai.com/authorize?state=synthetic&scope=openid");
+ Check(firefoxStart.ArgumentList.SequenceEqual(new[]{"-profile",BrowserLauncher.GuestFirefoxProfile,"-new-window","https://auth.openai.com/authorize?state=synthetic&scope=openid"}),"Firefox opens official login with a separate guest profile and no Windows HTTPS association");
  var zip=Path.Combine(root,"bad.zip");using(var z=ZipFile.Open(zip,ZipArchiveMode.Create)){using var w=new StreamWriter(z.CreateEntry("../escape.txt").Open());w.Write("x");}
  var dest=Path.Combine(root,"extract");Directory.CreateDirectory(dest);Refuses(()=>Isolation.ExtractSeed(zip,dest),"archive traversal rejected");
  Check(!File.Exists(Path.Combine(root,"escape.txt")),"archive did not write outside destination");
