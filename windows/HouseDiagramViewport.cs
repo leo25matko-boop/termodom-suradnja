@@ -53,7 +53,8 @@ internal sealed class HouseDiagramViewport : DockPanel
         buttons.Children.Add(larger);
         DockPanel.SetDock(buttons, Dock.Right);
         controls.Children.Add(buttons);
-        controls.Children.Add(new TextBlock { Text = "Prikaz kuće", FontSize = 12, Foreground = quiet, VerticalAlignment = VerticalAlignment.Center });
+        controls.Children.Add(new TextBlock { Text = "Kuća i kotlovnica", FontSize = 14, Foreground = quiet,
+            FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         DockPanel.SetDock(controls, Dock.Top);
         Children.Add(controls);
         Children.Add(surface);
@@ -61,7 +62,7 @@ internal sealed class HouseDiagramViewport : DockPanel
         surface.Children.Add(pan);
         AutomationProperties.SetName(pan, "Zumirani presjek kuće");
         AutomationProperties.SetHelpText(pan, "Pomičite presjek povlačenjem, klizačima ili tipkama sa strelicama.");
-        surface.ToolTip = "Ctrl + kotačić za zumiranje. Povucite u zumiranom prikazu za pomicanje.";
+        AutomationProperties.SetHelpText(larger, "Ctrl i kotačić također povećavaju presjek. U povećanom prikazu možete ga povlačiti.");
 
         fit.Child = diagram;
         UpdateButtons();

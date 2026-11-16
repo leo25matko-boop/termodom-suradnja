@@ -573,6 +573,41 @@ public sealed class MainWindow : Window
             heatingTab = sub; await Navigate(id); await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle); UpdateLayout();
             if (id == "home")
             {
+                void VerifyIllustratedLayout()
+                {
+                    FrameworkElement Element(string key) => Descendants<FrameworkElement>(this)
+                        .Single(element => AutomationProperties.GetAutomationId(element) == key);
+                    Rect Bounds(string key)
+                    {
+                        var element = Element(key);
+                        return element.TransformToAncestor(this).TransformBounds(new Rect(element.RenderSize));
+                    }
+                    var picture = Bounds("house-original-artwork");
+                    var roof = Bounds("house-roof");
+                    var upstairs = Bounds("house-floor-kat");
+                    var downstairs = Bounds("house-floor-prizemlje");
+                    var boiler = Bounds("house-boiler-room");
+                    var outdoors = Bounds("house-outside");
+                    if (Element("house-original-artwork") is not Image { Source: not null } ||
+                        picture.Width < 260 || !picture.Contains(roof) || !picture.Contains(upstairs) || !picture.Contains(downstairs) ||
+                        roof.Bottom >= upstairs.Top || upstairs.Bottom >= downstairs.Top ||
+                        picture.Right >= boiler.Left || outdoors.Bottom >= boiler.Top)
+                        throw new Exception("Prikaz mora zadržati krov i obje etaže na slici, a vrijeme i opremu izvan kuće bez preklapanja.");
+                    var upperReadings = Descendants<TextBlock>(Element("house-floor-kat")).Select(text => text.Text).ToArray();
+                    var lowerReadings = Descendants<TextBlock>(Element("house-floor-prizemlje")).Select(text => text.Text).ToArray();
+                    if (!upperReadings.Contains("22,3 °C") || !upperReadings.Contains("35,8 °C") ||
+                        !lowerReadings.Contains("21,7 °C") || !lowerReadings.Contains("34,5 °C"))
+                        throw new Exception("Gornji i donji kat moraju zadržati vlastita mjerenja.");
+                }
+                VerifyIllustratedLayout();
+                var originalWidth = Width;
+                Width = MinWidth;
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                UpdateLayout();
+                VerifyIllustratedLayout();
+                Width = originalWidth;
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                UpdateLayout();
                 var buffers = Descendants<Border>(this).Where(node => AutomationProperties.GetAutomationId(node).StartsWith("buffer-", StringComparison.Ordinal))
                     .ToDictionary(AutomationProperties.GetAutomationId, node => Descendants<TextBlock>(node).Select(text => text.Text).ToArray());
                 if (buffers.Count != 2 || !buffers["buffer-2000"].Contains("62,3 °C") || !buffers["buffer-2000"].Contains("48,7 °C") ||
@@ -617,7 +652,7 @@ public sealed class MainWindow : Window
             var bitmap = new RenderTargetBitmap((int)ActualWidth, (int)ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(this);
             using var output = File.Create(Path.Combine(directory, file + ".png")); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); encoder.Save(output);
         }
-        File.WriteAllText(Path.Combine(directory, "native-smoke.txt"), "TERMODOM_WINDOWS_NATIVE_SMOKE_OK\nNative house sections and confirmed 2,000 L puffer levels; bounded zoom, scrollable magnified view, refresh preservation and reset. WPF 24 sliders; 5 numeric settings + climate; 10 chart sources; nine native screens including disabled synthetic camera metadata bindings; fixture reads only; no WebView.\n");
+        File.WriteAllText(Path.Combine(directory, "native-smoke.txt"), "TERMODOM_WINDOWS_NATIVE_SMOKE_OK\nOriginal illustrated house; roof and correctly mapped floor overlays, exterior and boiler placements at normal and minimum widths; confirmed 2,000 L puffer levels; bounded zoom, scrollable magnified view, refresh preservation and reset. WPF 24 sliders; 5 numeric settings + climate; 10 chart sources; nine native screens including disabled synthetic camera metadata bindings; fixture reads only; no WebView.\n");
     }
     static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
     {

@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 
 namespace TermoDom;
@@ -32,140 +33,179 @@ internal sealed class HouseDashboard : StackPanel
         this.solarFetched = solarFetched;
         this.demo = demo;
 
-        Children.Add(OutdoorStrip(weather, weatherError));
-        var plan = Columns(1.14, 1);
-        var house = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
-        house.Children.Add(Roof(solar, solarEmpty));
-        house.Children.Add(Floor("kat", "Kat", "polaz_kat", "Kat · termostat i polaz vode"));
-        house.Children.Add(Floor("prizemlje", "Prizemlje", "polaz_priz", "Prizemlje · termostat i polaz vode"));
-        house.Children.Add(Plinth());
-        plan.Children.Add(house);
-        var boiler = Equipment();
-        Grid.SetColumn(boiler, 1);
-        plan.Children.Add(boiler);
-        var pipes = new Canvas { Width = 13, Height = 25, HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 91), IsHitTestVisible = false };
-        pipes.Children.Add(new Line { X1 = 0, X2 = 13, Y1 = 7, Y2 = 7, Stroke = Paint("#A78667"), StrokeThickness = 3 });
-        pipes.Children.Add(new Line { X1 = 0, X2 = 13, Y1 = 17, Y2 = 17, Stroke = Paint("#5C8794"), StrokeThickness = 3 });
-        plan.Children.Add(pipes);
+        var plan = Columns(1.19, 1);
+        var house = new HouseScene(CollectorBadge(),
+            Floor("kat", "1. kat", "polaz_kat"),
+            Floor("prizemlje", "Prizemlje", "polaz_priz"));
+        var sceneFrame = new Border { Child = house,
+            Background = Paint("#101C24"), BorderBrush = Edge, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12), VerticalAlignment = VerticalAlignment.Top };
+        var regulation = InlineLink("Rasporedi i regulator →", "heating", "house-heating");
+        regulation.Margin = new Thickness(0, 8, 0, 0);
+        var electric = SolarSummary(solar, solarEmpty);
+        electric.Margin = new Thickness(0, 8, 0, 0);
+        var houseColumn = Stack(sceneFrame, regulation, electric);
+        houseColumn.Margin = new Thickness(0, 0, 14, 0);
+        plan.Children.Add(houseColumn);
+
+        var outdoor = OutdoorStrip(weather, weatherError);
+        outdoor.Margin = new Thickness(0, 0, 0, 9);
+        var annex = Stack(outdoor, Equipment());
+        Grid.SetColumn(annex, 1);
+        plan.Children.Add(annex);
         Children.Add(new HouseDiagramViewport(plan, zoom, Quiet));
-        if (weather?.Days.Count > 0) Children.Add(Forecast(weather));
+
+        if (weather != null) Children.Add(Forecast(weather, weatherError));
         if (telemetry?.Temperature("house/polaz_priz2/temp") != null || telemetry?.Temperature("house/sensor1/temp") != null)
             Children.Add(AdditionalSensors());
     }
 
     FrameworkElement OutdoorStrip(OzaljWeather? weather, string? weatherError)
     {
-        var grid = Columns(1, 1.5);
-        var local = telemetry?.Temperature("house/outdoor/temp");
-        var localReading = Stack(Label("VANJSKI SENZOR", 11, Mint, true), Reading(local, 33, Ink), Label("Mjereno kod kuće", 12, Quiet));
-        var weatherContent = Stack(Label("VRIJEME · OZALJ", 11, Sky, true));
-        var conditions = Columns(1, 1.18);
+        var grid = Columns(1.12, 1);
         var summary = new DockPanel();
-        var icon = WeatherIcon(weather?.Code, weather?.IsDay ?? true, 36);
-        icon.Margin = new Thickness(0, 3, 10, 2);
+        var icon = WeatherIcon(weather?.Code, weather?.IsDay ?? true, 28);
+        icon.Margin = new Thickness(0, 1, 7, 0);
+        icon.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(icon, Dock.Left);
         summary.Children.Add(icon);
-        summary.Children.Add(Stack(Label(Format(weather?.Temperature), 30, weather == null ? Quiet : Ink, true),
-            Label(weather == null ? weatherError ?? "Učitavam Open-Meteo…" : HouseTelemetrySource.WeatherDescription(weather.Code, weather.IsDay), 12, Quiet)));
-        conditions.Children.Add(summary);
-        if (weather != null)
-        {
-            var details = Stack(Label($"Osjećaj {Format(weather.FeelsLike)} · Vlažnost {Format(weather.Humidity, "%")}", 11, Quiet),
-                Label($"Vjetar {Format(weather.Wind, "km/h")} · Tlak {Format(weather.Pressure, "hPa")}", 11, Quiet),
-                Label($"Vjerojatnost kiše {Format(weather.RainChance, "%")}", 11, Quiet));
-            details.Margin = new Thickness(9, 4, 0, 0);
-            var attribution = demo ? "Primjer vremena" : "Open-Meteo · " + (weather.MeasuredAt?.ToString("HH:mm", Hr) ?? "—");
-            if (weatherError != null) attribution += " · zadnja dostupna prognoza";
-            details.Children.Add(Label(attribution, 10, Sky));
-            Grid.SetColumn(details, 1);
-            conditions.Children.Add(details);
-        }
-        else Grid.SetColumnSpan(summary, 2);
-        weatherContent.Children.Add(conditions);
-        var localCard = Frame(localReading, Paint("#1B3034"), 10);
-        localCard.Margin = new Thickness(0, 0, 10, 0);
-        grid.Children.Add(localCard);
-        var weatherCard = Frame(weatherContent, Paint("#192C3C"), 10);
-        Grid.SetColumn(weatherCard, 1);
-        grid.Children.Add(weatherCard);
-        return grid;
+        var conditions = weather == null ? weatherError ?? "Učitavanje prognoze…" :
+            $"{HouseTelemetrySource.WeatherDescription(weather.Code, weather.IsDay)} · {Format(weather.Temperature)}";
+        summary.Children.Add(Stack(Label("Vrijeme · Ozalj", 14, Ink, true), Label(conditions, 12, Quiet)));
+        grid.Children.Add(summary);
+
+        var sensor = Stack(Label("Vanjski senzor", 11, Quiet, true), Reading(telemetry?.Temperature("house/outdoor/temp"), 19, Mint));
+        var separation = new Border { Child = sensor, Padding = new Thickness(10, 0, 0, 0),
+            Margin = new Thickness(8, 0, 0, 0), BorderBrush = Edge, BorderThickness = new Thickness(1, 0, 0, 0) };
+        Grid.SetColumn(separation, 1);
+        grid.Children.Add(separation);
+        var panel = Frame(grid, Paint("#192C37"), 9);
+        AutomationProperties.SetAutomationId(panel, "house-outside");
+        return panel;
     }
 
-    FrameworkElement Roof(SolarData? solar, string emptyText)
+    FrameworkElement CollectorBadge()
     {
-        var stack = new StackPanel();
-        stack.Children.Add(Illustration("roof", 460, 114, 120));
-        var source = Columns(.91, 1.09);
-        var collectors = Stack(Label("SOLARNI KOLEKTORI", 12, Gold, true), Label("Temperatura kolektora", 12, Quiet),
-            Reading(telemetry?.Temperature("house/solar/temp"), 26, Gold));
-        collectors.Margin = new Thickness(0, 0, 7, 0);
-        source.Children.Add(collectors);
+        var collectors = new DockPanel();
+        var caption = Label("Solarni kolektori", 12, Ink, true);
+        caption.Margin = new Thickness(0, 2, 9, 0);
+        DockPanel.SetDock(caption, Dock.Left);
+        collectors.Children.Add(caption);
+        collectors.Children.Add(Reading(telemetry?.Temperature("house/solar/temp"), 15, Gold));
+        var badge = Frame(collectors, Paint("#F01A2D36"), 6);
+        badge.CornerRadius = new CornerRadius(8);
+        AutomationProperties.SetAutomationId(badge, "house-roof");
+        return badge;
+    }
+
+    FrameworkElement SolarSummary(SolarData? solar, string emptyText)
+    {
+        var row = new DockPanel();
+        var button = InlineLink("Otvori elektranu →", "solar", "house-solar");
+        button.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(button, Dock.Right);
+        row.Children.Add(button);
         var generation = Stack(Label("FUSIONSOLAR · ELEKTRANA", 12, Sky, true));
-        var values = Stack(Label($"{Format(solar?.Power, "kW")}  ·  Danas {Format(solar?.Daily, "kWh")}", 16, Ink, true));
-        generation.Children.Add(values);
+        if (solar != null) generation.Children.Add(Label($"{Format(solar.Power, "kW")}  ·  Danas {Format(solar.Daily, "kWh")}",
+            14, solarFetched.HasValue && now - solarFetched.Value > TimeSpan.FromMinutes(3) ? Quiet : Ink, true));
         if (solarFetched.HasValue)
         {
             var elapsed = now - solarFetched.Value;
             if (elapsed > TimeSpan.FromMinutes(10)) generation.Children.Add(Label("Zadnje dohvaćeno " + solarFetched.Value.ToLocalTime().ToString("d.M. HH:mm", Hr), 10, Quiet));
-            if (elapsed > TimeSpan.FromMinutes(3)) values.Opacity = .62;
         }
-        if (solar == null || emptyText.Length > 0) generation.Children.Add(Label(emptyText, 11, Quiet));
-        generation.Children.Add(InlineLink("Otvori elektranu →", "solar", "house-solar"));
-        var electric = new Border { BorderBrush = Edge, BorderThickness = new Thickness(1, 0, 0, 0), Padding = new Thickness(8, 0, 0, 0), Child = generation };
-        Grid.SetColumn(electric, 1);
-        source.Children.Add(electric);
-        var footer = Frame(source, Paint("#2C3034"), 12);
-        footer.CornerRadius = new CornerRadius(0);
-        stack.Children.Add(footer);
-        AutomationProperties.SetName(stack, "Krov kuće sa solarnim kolektorima i pregledom elektrane");
-        return stack;
+        if (emptyText.Length > 0) generation.Children.Add(Label(emptyText, 11, Quiet));
+        row.Children.Add(generation);
+        return Frame(row, Panel, 9);
     }
 
-    FrameworkElement Floor(string id, string title, string supply, string accessibleName)
+    FrameworkElement Floor(string id, string title, string supply)
     {
         var room = telemetry?.Room(id);
-        var inset = Columns(.72, 1.08, .78);
-        var scene = Illustration(id, 128, 94, 91);
-        scene.VerticalAlignment = VerticalAlignment.Center;
-        scene.Margin = new Thickness(0, 0, 12, 0);
-        inset.Children.Add(scene);
-
-        var thermometer = Stack(Label(title, 21, Ink, true), Label("Termostat · izmjereno", 12, Quiet), Reading(room?.Measured, 35, Mint));
-        Grid.SetColumn(thermometer, 1);
-        inset.Children.Add(thermometer);
-        var settings = Stack(Label("Zadano", 12, Quiet), Reading(room?.Target, 24, Mint),
-            Label("Polaz vode", 12, Quiet), Reading(telemetry?.Temperature("house/" + supply + "/temp"), 18, Gold));
-        settings.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(settings, 2);
-        inset.Children.Add(settings);
-        var floor = Frame(inset, id == "kat" ? Paint("#273E40") : Paint("#2C3737"), 14);
-        floor.CornerRadius = new CornerRadius(0);
-        floor.Margin = new Thickness(0, 4, 0, 0);
-        floor.BorderThickness = new Thickness(2, 0, 2, 3);
-        AutomationProperties.SetName(floor, accessibleName);
+        var values = Columns(1, 1);
+        values.Children.Add(Stack(Label("Sobna", 11, Quiet), Reading(room?.Measured, 20, Mint)));
+        var target = Stack(Label("Zadana", 11, Quiet), Reading(room?.Target, 20, Mint));
+        Grid.SetColumn(target, 1);
+        values.Children.Add(target);
+        var water = new DockPanel();
+        var waterLabel = Label("Polaz vode", 11, Quiet);
+        waterLabel.Margin = new Thickness(0, 2, 7, 0);
+        DockPanel.SetDock(waterLabel, Dock.Left);
+        water.Children.Add(waterLabel);
+        water.Children.Add(Reading(telemetry?.Temperature("house/" + supply + "/temp"), 13, Gold));
+        var floor = Frame(Stack(Label(title, 15, Ink, true), values, water), Paint("#EC14232C"), 8);
+        floor.CornerRadius = new CornerRadius(9);
+        floor.BorderBrush = Paint("#788D8E");
+        AutomationProperties.SetName(floor, title + " · sobna temperatura, zadana temperatura i polaz vode");
+        AutomationProperties.SetAutomationId(floor, "house-floor-" + id);
         return floor;
     }
 
-    FrameworkElement Plinth()
+    // The bitmap is a crop of the original web illustration. Overlays follow the
+    // actual storeys as it resizes; the same WPF elements remain legible in zoom.
+    sealed class HouseScene : Panel
     {
-        var foundation = Frame(InlineLink("Rasporedi i regulator →", "heating", "house-heating"), Paint("#26383B"), 11);
-        foundation.CornerRadius = new CornerRadius(0, 0, 12, 12);
-        foundation.BorderThickness = new Thickness(2, 0, 2, 2);
-        return foundation;
+        static readonly BitmapImage Cutaway = LoadCutaway();
+        readonly UIElement roof, upstairs, downstairs;
+        readonly Image artwork = new() { Source = Cutaway, Stretch = Stretch.Fill, IsHitTestVisible = false };
+
+        public HouseScene(UIElement roof, UIElement upstairs, UIElement downstairs)
+        {
+            this.roof = roof;
+            this.upstairs = upstairs;
+            this.downstairs = downstairs;
+            AutomationProperties.SetName(artwork, "Izvorna ilustracija presjeka kuće s prizemljem, 1. katom i solarnim kolektorima");
+            AutomationProperties.SetAutomationId(artwork, "house-original-artwork");
+            ClipToBounds = true;
+            Children.Add(artwork);
+            Children.Add(roof);
+            Children.Add(upstairs);
+            Children.Add(downstairs);
+        }
+
+        static BitmapImage LoadCutaway()
+        {
+            var image = new BitmapImage(new Uri("pack://application:,,,/Assets/house-cutaway.png"));
+            image.Freeze();
+            return image;
+        }
+
+        static double FloorWidth(double width) => Math.Min(278, width * .58);
+
+        protected override Size MeasureOverride(Size availableSize)
+        {
+            var width = double.IsFinite(availableSize.Width) ? availableSize.Width : 500;
+            var height = Math.Clamp(width * (896d / 1006), 352, 515);
+            artwork.Measure(new Size(width, height));
+            roof.Measure(new Size(width * .66, double.PositiveInfinity));
+            foreach (var floor in new[] { upstairs, downstairs })
+                floor.Measure(new Size(FloorWidth(width), double.PositiveInfinity));
+            // Leave enough room for old readings whose timestamp adds a line.
+            var tallest = Math.Max(upstairs.DesiredSize.Height, downstairs.DesiredSize.Height);
+            return new Size(width, Math.Max(height, (tallest + 8) / .315));
+        }
+
+        protected override Size ArrangeOverride(Size size)
+        {
+            var (width, height) = (size.Width, size.Height);
+            artwork.Arrange(new Rect(size));
+            roof.Arrange(new Rect(width * .975 - roof.DesiredSize.Width, height * .014, roof.DesiredSize.Width, roof.DesiredSize.Height));
+            upstairs.Arrange(new Rect(width * .09, height * .335, FloorWidth(width), upstairs.DesiredSize.Height));
+            downstairs.Arrange(new Rect(width * .09, height * .665, FloorWidth(width), downstairs.DesiredSize.Height));
+            return size;
+        }
     }
 
     FrameworkElement Equipment()
     {
-        var equipment = Stack(Label("Kotlovnica", 24, Ink, true));
+        var equipment = Stack(Label("Kotlovnica", 20, Ink, true));
         var generation = new UniformGrid { Columns = 2, Margin = new Thickness(0, 7, 0, 2) };
         generation.Children.Add(Device("Kotao", "boiler", telemetry?.Temperature("house/kotal/temp"), Gold));
-        generation.Children.Add(Device("Dizalica topline", "heatpump", null, Sky));
+        generation.Children.Add(Device("Toplinska pumpa", "heatpump", null, Sky));
         equipment.Children.Add(generation);
 
         var buffers = new UniformGrid { Columns = 2, Margin = new Thickness(0, 4, 0, 4) };
-        buffers.Children.Add(Buffer("Pufer 2.000 L", Gold, true));
-        buffers.Children.Add(Buffer("Pufer 1.000 L", Sky, false));
+        buffers.Children.Add(Buffer("Pufer 2000 L", Gold, true));
+        buffers.Children.Add(Buffer("Pufer 1000 L", Sky, false));
         equipment.Children.Add(buffers);
 
         var water = new StackPanel { Margin = new Thickness(0, 7, 0, 0) };
@@ -174,11 +214,17 @@ internal sealed class HouseDashboard : StackPanel
         equipment.Children.Add(new Border { Height = 1, Background = Edge, Margin = new Thickness(0, 9, 0, 6) });
         equipment.Children.Add(Label("Cirkulacijske pumpe", 16, Ink, true));
 
-        var motorGrid = new UniformGrid { Columns = 2 };
-        foreach (var (id, title) in new[] { ("kotao", "Kotao"), ("prizemlje", "Prizemlje"), ("kat", "Kat"), ("sanitarna", "Sanitarna voda"), ("solar", "Solarni krug") })
+        var motorGrid = new UniformGrid { Columns = 2, Margin = new Thickness(0, 5, -5, -5) };
+        motorGrid.SizeChanged += (_, args) =>
+        {
+            if (args.WidthChanged) motorGrid.Columns = args.NewSize.Width >= 400 ? 3 : 2;
+        };
+        foreach (var (id, title) in new[] { ("kotao", "Kotao"), ("prizemlje", "Prizemlje"), ("kat", "1. kat"), ("sanitarna", "Sanitarna voda"), ("solar", "Solarni kolektori") })
             motorGrid.Children.Add(Pump(title, pumps.GetValueOrDefault(id)));
         equipment.Children.Add(motorGrid);
-        return Frame(equipment, Paint("#1D2B31"), 14);
+        var room = Frame(equipment, Paint("#1D2B31"), 12);
+        AutomationProperties.SetAutomationId(room, "house-boiler-room");
+        return room;
     }
 
     FrameworkElement Device(string name, string image, HouseReading<double>? sample, Brush accent)
@@ -229,9 +275,11 @@ internal sealed class HouseDashboard : StackPanel
         var enabled = sample?.Value;
         var age = sample?.Age(now) ?? ReadingAge.Unknown;
         var accent = enabled is true ? Mint : enabled is false ? Red : Dim;
-        var pump = new DockPanel { Margin = new Thickness(0, 6, 7, 2) };
-        var icon = new Grid { Width = 30, Height = 30, Margin = new Thickness(0, 0, 7, 0), VerticalAlignment = VerticalAlignment.Top };
-        icon.Children.Add(new Ellipse { Stroke = Edge, Fill = Slate, StrokeThickness = 1 });
+        var pump = new DockPanel();
+        var icon = new Grid { Width = 34, Height = 30, Margin = new Thickness(0, 0, 7, 0), VerticalAlignment = VerticalAlignment.Top };
+        icon.Children.Add(new Path { Data = Geometry.Parse("M 0,9 H 5 V 21 H 0 Z M 29,9 H 34 V 21 H 29 Z"),
+            Fill = Paint("#4B686F"), Stroke = Paint("#729198"), StrokeThickness = 1 });
+        icon.Children.Add(new Ellipse { Width = 26, Height = 26, Stroke = Paint("#5B767B"), Fill = Slate, StrokeThickness = 1.4 });
         var bladeCanvas = new Canvas { Width = 26, Height = 26 };
         var glyph = enabled.HasValue ? "M 18,7 A 8,8 0 1 1 6,17 M 5,13 L 6,17 L 10,16" : "M 8,13 H 18";
         var blade = new Path { Data = Geometry.Parse(glyph), Stroke = accent,
@@ -255,8 +303,11 @@ internal sealed class HouseDashboard : StackPanel
         else if (enabled.HasValue && age == ReadingAge.Unknown) state.Children.Add(Label("Vrijeme nepoznato", 10, Quiet));
         pump.Children.Add(state);
         if (age is ReadingAge.Muted or ReadingAge.Outdated) { icon.Opacity = .58; state.Opacity = .74; }
-        AutomationProperties.SetName(pump, name + ", " + label);
-        return pump;
+        var frame = Frame(pump, Slate, 5);
+        frame.Margin = new Thickness(0, 0, 5, 5);
+        frame.CornerRadius = new CornerRadius(7);
+        AutomationProperties.SetName(frame, name + ", " + label);
+        return frame;
     }
 
     FrameworkElement Reading(HouseReading<double>? sample, double size, Brush accent)
@@ -272,7 +323,7 @@ internal sealed class HouseDashboard : StackPanel
         return panel;
     }
 
-    FrameworkElement Forecast(OzaljWeather weather)
+    FrameworkElement Forecast(OzaljWeather weather, string? weatherError)
     {
         var forecast = new UniformGrid { Columns = weather.Days.Count };
         foreach (var day in weather.Days)
@@ -283,8 +334,13 @@ internal sealed class HouseDashboard : StackPanel
             card.Margin = new Thickness(0, 0, 5, 0);
             forecast.Children.Add(card);
         }
-        return Frame(Stack(Label("Prognoza za Ozalj", 17, Ink, true), forecast,
-            Label(demo ? "Primjer prognoze" : "Prognoza · Open-Meteo", 10, Sky)), Paint("#1B2D39"), 12);
+        var conditions = Label($"Osjećaj {Format(weather.FeelsLike)} · Vlažnost {Format(weather.Humidity, "%")} · " +
+            $"Vjetar {Format(weather.Wind, "km/h")} · Tlak {Format(weather.Pressure, "hPa")} · Kiša {Format(weather.RainChance, "%")}", 12, Quiet);
+        conditions.Margin = new Thickness(0, 4, 0, 8);
+        var attribution = demo ? "Primjer prognoze" : "Prognoza · Open-Meteo · " + (weather.MeasuredAt?.ToString("HH:mm", Hr) ?? "—");
+        if (weatherError != null) attribution += " · zadnja dostupna prognoza";
+        return Frame(Stack(Label("Prognoza za Ozalj", 17, Ink, true), conditions, forecast,
+            Label(attribution, 10, Sky)), Paint("#1B2D39"), 12);
     }
 
     FrameworkElement AdditionalSensors()
@@ -352,33 +408,6 @@ internal sealed class HouseDashboard : StackPanel
         const string none = "Transparent";
         switch (kind)
         {
-            case "roof":
-                Draw("M0,108 L219,11 L457,108 Z", "#2E4247", "#5B7275", 2);
-                Draw("M2,108 L220,11 L319,108 Z", "#354D4F");
-                Draw("M219,11 L457,108 L435,108 L217,23 L22,108 L1,108 Z", "#758C87");
-                Draw("M90,69 L190,24 L285,70 L175,105 Z", "#173544", "#A1BDCB", 2);
-                Draw("M106,76 L209,33 M123,83 L225,40 M142,91 L244,47 M157,98 L259,55 M126,53 L215,92 M157,40 L251,80", none, "#71A8C5", 1);
-                Draw("M239,18 L405,86 L382,92 L219,27 Z", "#243337");
-                Draw("M349,56 L349,35 L374,35 L374,67 Z", "#637470", "#879987", 1);
-                Draw("M345,35 L378,35 L377,29 L347,29 Z", "#859A90");
-                Draw("M0,108 L460,108 L460,114 L0,114 Z", "#536862");
-                break;
-            case "kat":
-                Draw("M7,77 L122,77 M11,70 L11,18 L110,18 L110,77", none, "#587373", 1);
-                Draw("M70,24 H104 V55 H70 Z M87,24 V55 M70,39 H104", "#293F4F", "#84A2A7", 1.2);
-                Draw("M17,56 H68 V72 H17 Z", "#285051", "#82A9A2", 1.5);
-                Draw("M17,69 L17,48 Q17,45 22,45 H29 Q33,45 33,51 H64 Q68,51 68,56", "#486663", "#82A9A2", 1.5);
-                Draw("M16,73 V77 M66,73 V77 M35,57 H64 M81,67 H113 M84,68 V77 M107,68 V77", none, "#8EAC9D", 1.5);
-                Draw("M80,65 L84,59 L88,65 Z", "#E3B886");
-                break;
-            case "prizemlje":
-                Draw("M4,77 L122,77 M11,77 L11,17 L114,17 L114,77", none, "#587373", 1);
-                Draw("M18,25 H48 V50 H18 Z M32,25 V50 M18,37 H48", "#315164", "#90ABAA", 1);
-                Draw("M54,63 L57,46 Q59,42 64,42 H97 Q101,42 102,46 L105,63 Z", "#4C6764", "#9EB8A5", 1.4);
-                Draw("M53,56 Q48,52 46,56 V67 Q46,72 52,72 H108 Q113,72 113,67 V56 Q110,52 106,56 L102,63 H58 Z", "#617F70", "#A1B9A0", 1.2);
-                Draw("M53,72 V77 M106,72 V77 M82,51 V62 M13,64 H34 L31,75 H17 Z", "#B69370", "#D8BC92", 1);
-                Draw("M24,64 V49 M24,59 Q12,60 16,53 Q20,51 24,59 M24,57 Q25,46 32,46 Q36,49 24,57", "#79AB81", "#99B891", 1);
-                break;
             case "boiler":
                 Draw("M9,14 Q9,10 13,10 H31 Q35,10 35,14 V45 H9 Z M15,45 V49 M29,45 V49 M23,10 V5 H33", "#59666A", "#A7ACA7", 1.3);
                 Draw("M14,22 H30 V37 H14 Z", "#23333C", "#A7ACA7", 1);
@@ -394,7 +423,7 @@ internal sealed class HouseDashboard : StackPanel
                 Draw("M10,14 Q21,19 33,14 M10,25 Q21,30 33,25 M10,36 Q21,41 33,36 M19,5 V2 M24,49 V52", none, "#ABC0B4", 1);
                 break;
         }
-        return new Viewbox { Child = canvas, Height = displayHeight, Stretch = kind == "roof" ? Stretch.Fill : Stretch.Uniform };
+        return new Viewbox { Child = canvas, Height = displayHeight, Stretch = Stretch.Uniform };
     }
 
     static FrameworkElement WeatherIcon(int? code, bool isDay, int size)
