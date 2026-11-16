@@ -7,8 +7,8 @@
 [Setup]
 AppId={{A84C74E6-A779-4D3E-AD1F-C0D4CD50F372}
 AppName=TermoDom
-AppVersion=2.0.0
-AppVerName=TermoDom 2.0.0
+AppVersion=2.1.1
+AppVerName=TermoDom 2.1.1
 AppPublisher=TermoDom
 AppPublisherURL=https://github.com/leo25matko-boop/termo
 AppSupportURL=https://github.com/leo25matko-boop/termo/issues
@@ -20,7 +20,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir={#OutputPath}
-OutputBaseFilename=TermoDom-Setup-2.0.0-x64
+OutputBaseFilename=TermoDom-Setup-2.1.1-x64
+VersionInfoVersion=2.1.1.0
+VersionInfoProductVersion=2.1.1
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

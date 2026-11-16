@@ -4,8 +4,11 @@ import android.app.Activity;
 import android.app.Instrumentation;
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.view.InputDevice;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -73,9 +76,23 @@ public final class NativeSmokeInstrumentation extends Instrumentation {
             evidenceDirectory = new File(getTargetContext().getExternalFilesDir(null), "native-smoke");
             check(evidenceDirectory.isDirectory() || evidenceDirectory.mkdirs(), "Cannot create screenshot folder.");
 
-            waitFor("overview", () -> hasClass(activity.getWindow().getDecorView(), "se.automatiziraj.termodom.TemperatureDialView"));
+            waitFor("overview", () -> {
+                View diagram=activity.getWindow().getDecorView().findViewWithTag("house-section");
+                return diagram instanceof HouseSectionView && diagram.getWidth()>0
+                        && diagram.getContentDescription().toString().contains("22,8°")
+                        && activity.getWindow().getDecorView().findViewWithTag("ozalj-weather")!=null;
+            });
             verifyNativeHierarchy();
             capture("01-pregled");
+            captureHouse();
+            runOnMainSync(()->{
+                View root=activity.getWindow().getDecorView();
+                HouseSectionView diagram=root.findViewWithTag("house-section");
+                View zoom=root.findViewWithTag("house-zoom-in"), reset=root.findViewWithTag("house-zoom-reset");
+                check(zoom.performClick()&&diagram.zoomFactor()>1f,"The house zoom did not respond.");
+                check(reset.performClick()&&diagram.zoomFactor()==1f,"The house zoom did not reset.");
+                verifyShortPinch(diagram);
+            });
 
             navigate("zones");
             waitFor("zones", () -> hasClass(activity.getWindow().getDecorView(), "se.automatiziraj.termodom.TemperatureDialView"));
@@ -262,6 +279,44 @@ public final class NativeSmokeInstrumentation extends Instrumentation {
         try (FileOutputStream output = new FileOutputStream(new File(evidenceDirectory, name + ".txt"))) {
             output.write(hierarchy.get().getBytes(StandardCharsets.UTF_8));
         }
+    }
+
+    private static void verifyShortPinch(HouseSectionView view) {
+        long down=SystemClock.uptimeMillis();
+        float y=view.getHeight()*.45f, center=view.getWidth()/2f;
+        float start=view.getWidth()*.075f, end=start*2;
+        int second=1<<MotionEvent.ACTION_POINTER_INDEX_SHIFT;
+        houseTouch(view,down,MotionEvent.ACTION_DOWN,y,center-start);
+        houseTouch(view,down,MotionEvent.ACTION_POINTER_DOWN|second,y,center-start,center+start);
+        houseTouch(view,down,MotionEvent.ACTION_MOVE,y,center-end,center+end);
+        houseTouch(view,down,MotionEvent.ACTION_POINTER_UP|second,y,center-end,center+end);
+        houseTouch(view,down,MotionEvent.ACTION_UP,y,center-end);
+        check(view.zoomFactor()>1.8f,"A short two-finger pinch did not zoom the house.");
+        view.resetZoom();
+    }
+
+    private static void houseTouch(HouseSectionView view,long down,int action,float y,float... positions) {
+        MotionEvent.PointerProperties[] pointers=new MotionEvent.PointerProperties[positions.length];
+        MotionEvent.PointerCoords[] coords=new MotionEvent.PointerCoords[positions.length];
+        for(int i=0;i<positions.length;i++){
+            pointers[i]=new MotionEvent.PointerProperties();pointers[i].id=i;pointers[i].toolType=MotionEvent.TOOL_TYPE_FINGER;
+            coords[i]=new MotionEvent.PointerCoords();coords[i].x=positions[i];coords[i].y=y;coords[i].pressure=1;
+        }
+        MotionEvent event=MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,pointers.length,pointers,coords,0,0,1,1,0,0,InputDevice.SOURCE_TOUCHSCREEN,0);
+        try{check(view.dispatchTouchEvent(event),"The house view did not receive touch input.");}finally{event.recycle();}
+    }
+
+    private void captureHouse() throws Exception {
+        AtomicReference<Bitmap> bitmap=new AtomicReference<>();
+        runOnMainSync(()->{
+            View view=activity.getWindow().getDecorView().findViewWithTag("house-section");
+            Bitmap image=Bitmap.createBitmap(view.getWidth(),view.getHeight(),Bitmap.Config.ARGB_8888);
+            view.draw(new Canvas(image));
+            bitmap.set(image);
+        });
+        try(FileOutputStream output=new FileOutputStream(new File(evidenceDirectory,"11-presjek-kuce.png"))){
+            check(bitmap.get().compress(Bitmap.CompressFormat.PNG,100,output),"Cannot save the house cutaway.");
+        }finally{bitmap.get().recycle();}
     }
 
     private static View findDescription(View root, String description) {

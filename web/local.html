@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="hr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101c24">
+    <title>TermoDom · Presjek kuće</title>
+    <link rel="stylesheet" href="./m-house.css">
+    <style>
+        body { margin: 0; min-height: 100vh; background: #101c24; color: #e1ebec; font: 16px system-ui, sans-serif; }
+        .td-house .td-top nav a { display: none; }
+        .td-local-nav { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; padding: 1.2rem; }
+        .td-local-nav p { margin: 0; }
+        .td-local-nav a { color: #bdf0e1; background: #1c3238; border: 1px solid #3e6264; border-radius: .55rem; padding: .55rem .85rem; }
+        [data-house-mount] { padding: 1.4rem; }
+    </style>
+    <script type="module" src="./m-house.js"></script>
+</head>
+<body data-house-local>
+    <div data-house-mount><p>Učitavanje mjerenja grijanja…</p></div>
+    <nav class="td-local-nav" aria-label="Izvorni rasporedi i grafikoni">
+        <p>Na izvornoj stranici:</p>
+        <a href="https://automatiziraj.se/centralno/php/prizemlje.php" target="_blank" rel="noopener noreferrer">Raspored prizemlja</a>
+        <a href="https://automatiziraj.se/centralno/php/kat.php" target="_blank" rel="noopener noreferrer">Raspored 1. kata</a>
+        <a href="https://automatiziraj.se/centralno/php/m.php" target="_blank" rel="noopener noreferrer">Grafikoni i povijest</a>
+    </nav>
+    <noscript>Uključite JavaScript u pregledniku kako biste otvorili TermoDom.</noscript>
+</body>
+</html>

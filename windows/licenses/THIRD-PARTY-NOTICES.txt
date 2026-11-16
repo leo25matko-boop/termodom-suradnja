@@ -1,4 +1,4 @@
-TermoDom Windows 2.0.0 third-party components
+TermoDom Windows third-party components
 
 The application uses dynamically linked, unmodified LibVLC and LibVLCSharp. Their
 DLLs remain separate in the installed application directory and may be replaced

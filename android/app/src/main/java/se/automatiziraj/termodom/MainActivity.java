@@ -15,6 +15,9 @@ import org.json.*;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
@@ -36,6 +39,14 @@ public final class MainActivity extends Activity {
     private final Set<Integer> hidden=new HashSet<>();
     private HeatingRepository repository;
     private JSONObject status,settings,settingsDraft,solarData;
+    private HouseTelemetry.Packet houseData, housePumps;
+    private final HouseSectionView.Viewport houseViewport=new HouseSectionView.Viewport();
+    private Bitmap houseArtwork;
+    private boolean houseLoading, pumpsLoading, weatherLoading, houseDetails, weatherDetails;
+    private String houseError="", pumpsError="", weatherError="";
+    private Instant lastWeatherAttempt=Instant.EPOCH;
+    private OzaljWeather.Reading weather;
+    private final OzaljWeather weatherSource=new OzaljWeather();
     private SolarRepository solarRepository=new SolarRepository();
     private String solarUrl="",solarError="";
     private boolean solarLoading;
@@ -52,7 +63,7 @@ public final class MainActivity extends Activity {
     private CameraPanel cameraPanel;
     private AlertDialog dialog;
     private OnBackInvokedCallback backCallback;
-    private final Runnable poll=new Runnable(){public void run(){if(!resumed||destroyed)return;loadStatus(false);if(page.equals("schedule"))loadSchedule(zone);if(page.equals("solar"))loadSolar();ui.postDelayed(this,90000);}};
+    private final Runnable poll=new Runnable(){public void run(){if(!resumed||destroyed)return;loadStatus(false);if(page.equals("overview")){loadHouse();loadWeather(false);}if(page.equals("schedule"))loadSchedule(zone);if(page.equals("solar"))loadSolar();ui.postDelayed(this,90000);}};
 
     @Override public void onCreate(Bundle saved){
         super.onCreate(saved);repository=BuildConfig.DEBUG&&testRepository!=null?testRepository:DevelopmentMode.repository(this);
@@ -66,6 +77,7 @@ public final class MainActivity extends Activity {
         shell();render(false);
         if(Build.VERSION.SDK_INT>=33){backCallback=this::back;getOnBackInvokedDispatcher().registerOnBackInvokedCallback(0,backCallback);}
         loadStatus(false);loadSchedule("kat");loadSchedule("prizemlje");
+        if(page.equals("overview")){loadHouse();loadWeather(false);}
         if(page.equals("settings"))loadSettings();if(page.equals("charts"))loadChart(chartId);if(page.equals("solar"))loadSolar();
     }
     private int dp(float v){return Math.round(v*getResources().getDisplayMetrics().density);}
@@ -97,7 +109,7 @@ public final class MainActivity extends Activity {
         actions=column();actions.setPadding(dp(15),dp(8),dp(15),dp(9));actions.setBackgroundColor(WHITE);add(shell,actions);nav=row();nav.setPadding(dp(6),dp(6),dp(6),dp(7));nav.setBackgroundColor(WHITE);add(shell,nav);
     }
     private void navigation(){nav.removeAllViews();for(int i=0;i<IDS.length;i++){String id=IDS[i];boolean selected=id.equals(page)||(id.equals("overview")&&Arrays.asList("solar","camera","upcoming").contains(page));LinearLayout b=column();b.setGravity(Gravity.CENTER);b.setPadding(0,dp(7),0,dp(5));b.setBackground(bg(selected?PALE:WHITE,15));b.setTag("nav-"+id);b.setContentDescription(NAMES[i]);b.setClickable(true);b.setFocusable(true);b.addView(new NavIconView(this,i,selected?GREEN:MUTED),new LinearLayout.LayoutParams(dp(23),dp(23)));TextView label=text(NAMES[i],10,selected?GREEN:MUTED,selected);label.setGravity(Gravity.CENTER);b.addView(label);b.setOnClickListener(v->navigate(id));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(62),1);lp.leftMargin=dp(2);lp.rightMargin=dp(2);nav.addView(b,lp);}}
-    private void navigate(String next){if(saving){toast("Pričekajte potvrdu spremanja.");return;}page=next;render(false);if(next.equals("schedule")&&!schedules.containsKey(zone))loadSchedule(zone);if(next.equals("settings")&&settings==null)loadSettings();if(next.equals("charts")&&!charts.containsKey(chartId))loadChart(chartId);if(next.equals("solar")&&solarData==null)loadSolar();}
+    private void navigate(String next){if(saving){toast("Pričekajte potvrdu spremanja.");return;}page=next;render(false);if(next.equals("overview")){if(houseData==null||Duration.between(houseData.observed,Instant.now()).getSeconds()>90)loadHouse();loadWeather(false);}if(next.equals("schedule")&&!schedules.containsKey(zone))loadSchedule(zone);if(next.equals("settings")&&settings==null)loadSettings();if(next.equals("charts")&&!charts.containsKey(chartId))loadChart(chartId);if(next.equals("solar")&&solarData==null)loadSolar();}
     private void render(boolean keep){if(destroyed||content==null)return;int y=keep?scroll.getScrollY():0;if(cameraPanel!=null){cameraPanel.close();cameraPanel=null;}content.removeAllViews();content.setTag("screen-"+page);content.setContentDescription(pageName());schedulePlot=null;note=null;headerTitle.setText(pageName()+(DevelopmentMode.enabled()?" · DEMO":" · Moj dom"));navigation();
         if(Arrays.asList(IDS).contains(page)&&!online&&!statusLoading&&status!=null)banner("Veza je prekinuta. Prikazana su posljednja očitanja. "+errorText);
         switch(page){case "overview":overview();break;case "zones":zones();break;case "schedule":schedule();break;case "charts":charts();break;case "settings":settings();break;case "solar":solar();break;case "camera":camera();break;case "upcoming":upcoming();break;}
@@ -112,17 +124,182 @@ public final class MainActivity extends Activity {
     private void syncWarning(){JSONObject s=status==null?null:status.optJSONObject("sync");if(s==null)return;String a=s.optString("kat",""),b=s.optString("prizemlje","");if((a+" "+b).toUpperCase(Locale.ROOT).contains("NO SYNC"))banner("Izvor javlja: "+a+" · "+b+". Dostupna web-stranica ne potvrđuje sinkronizaciju regulatora.");}
     private String pageName(){int index=Arrays.asList(IDS).indexOf(page);if(index>=0)return NAMES[index];switch(page){case "solar":return "Solarna elektrana";case "camera":return "Kamera";default:return "U pripremi";}}
     private void overview(){
-        int hour=Calendar.getInstance().get(Calendar.HOUR_OF_DAY);String greeting=hour<10?"Dobro jutro.":hour<18?"Dobar dan.":"Dobra večer.";
-        title("Moj pametni dom",greeting,"Grijanje, energija i kamera na jednom mjestu.");
-        if(status!=null){
-            LinearLayout climate=card();GradientDrawable hero=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff1f3c40,0xff182432});hero.setCornerRadius(dp(23));hero.setStroke(dp(1),BORDER);climate.setBackground(hero);
-            LinearLayout heading=row();heading.addView(text("Klima doma",18,INK,true),weight());heading.addView(new NavIconView(this,1,AMBER),new LinearLayout.LayoutParams(dp(25),dp(25)));add(climate,heading);gap(climate,12);
-            LinearLayout gauges=row();for(String id:new String[]{"kat","prizemlje"}){JSONObject z=zoneData(id);LinearLayout gauge=column();gauge.setGravity(Gravity.CENTER);gauge.addView(new TemperatureDialView(this,val(z,"temperature")),new LinearLayout.LayoutParams(dp(getResources().getConfiguration().screenWidthDp<360?124:142),dp(getResources().getConfiguration().screenWidthDp<360?124:142)));TextView label=text(id.equals("kat")?"Kat":"Prizemlje",13,INK,true);label.setGravity(Gravity.CENTER);add(gauge,label);gap(gauge,4);TextView pump=text(running(z,"pumpRunning"),10,MUTED,false);pump.setGravity(Gravity.CENTER);add(gauge,pump);gauges.addView(gauge,weight());}add(climate,gauges);gap(climate,14);metric(climate,"Vani",temp(val(status,"outside")));JSONObject boiler=status.optJSONObject("boiler"),sanitary=status.optJSONObject("sanitary");metric(climate,"Peć",temp(val(boiler,"temperature")));metric(climate,"Sanitarna voda",temp(val(sanitary,"temperature")));gap(climate,16);add(climate,button("Otvori grijanje",false,()->navigate("zones")));syncWarning();
-        }else if(statusLoading||errorText.isEmpty())loading("Dohvaćam očitanja grijanja…");else unavailable("Grijanje trenutačno nije dostupno",errorText,()->refreshAll(true));
+        add(content,text("Presjek kuće",28,INK,true));
+        gap(content,10);
+        Instant now=Instant.now();
+        HouseTelemetry telemetry=new HouseTelemetry(houseData,housePumps,DevelopmentMode.enabled());
+        if(houseArtwork==null) houseArtwork=BitmapFactory.decodeResource(getResources(),R.drawable.m_house_cutaway);
+        HouseSectionView house=new HouseSectionView(this,telemetry,houseViewport,houseArtwork);
+        houseZoomControls(house);
+        add(content,house);
+        gap(content,14);
+        houseTimestamps(telemetry,now);
+        weatherCard(telemetry,now);
+        LinearLayout climate=boilerRoom(telemetry,now);
+        if(!houseError.isEmpty()||!pumpsError.isEmpty()){
+            gap(climate,10);add(climate,text((houseData==null&&housePumps==null?"Očitanja trenutačno nisu dostupna.":"Osvježavanje nije uspjelo. Prikazana su posljednja dostupna očitanja.")+
+                    (!houseError.isEmpty()&&!pumpsError.isEmpty()?"":!houseError.isEmpty()?" · Temperature":" · Pumpe"),12,AMBER,false));
+        }else if(houseData==null||housePumps==null){gap(climate,10);add(climate,text("Dohvaćam očitanja grijanja…",12,MUTED,false));}
+        gap(climate,12);
+        add(climate,button(houseDetails?"Sakrij detaljna očitanja":"Prikaži detaljna očitanja",false,()->{houseDetails=!houseDetails;render(true);}));
+        gap(climate,8);add(climate,button("Otvori grijanje",false,()->navigate("zones")));
+        houseReadings(telemetry,now);
+        syncWarning();
         section("Vaš dom");
         LinearLayout modules=row();modules.setGravity(Gravity.TOP);module(modules,"solar","Solarna elektrana","FusionSolar · proizvodnja",5,AMBER);module(modules,"camera","Kamera","Xiaomi Mi Home · Mi 360°",6,GREEN);add(content,modules);gap(content,2);
         LinearLayout more=card();LinearLayout top=row();top.addView(text("Prostor za nove mogućnosti",16,INK,true),weight());top.addView(new NavIconView(this,7,MUTED),new LinearLayout.LayoutParams(dp(24),dp(24)));add(more,top);gap(more,8);add(more,text("Rasvjeta, uređaji i ostale integracije čekaju povezivanje.",12,MUTED,false));gap(more,14);Button prepare=button("Pogledaj što je u pripremi",false,()->navigate("upcoming"));prepare.setTag("module-upcoming");add(more,prepare);
     }
+    private void houseZoomControls(HouseSectionView house){
+        LinearLayout controls=row();
+        TextView hint=text("Zumiranje dvama prstima",11,MUTED,false);hint.setPadding(0,0,dp(5),0);controls.addView(hint,weight());
+        Button out=zoomButton(controls,"−","Smanji prikaz kuće","house-zoom-out",()->house.zoomBy(1f/1.25f));
+        Button reset=zoomButton(controls,"100 %","Vrati prikaz kuće na 100 posto","house-zoom-reset",house::resetZoom);
+        Button in=zoomButton(controls,"+","Povećaj prikaz kuće","house-zoom-in",()->house.zoomBy(1.25f));
+        Runnable update=()->{
+            float zoom=house.zoomFactor();
+            reset.setText(Math.round(zoom*100)+" %");
+            out.setEnabled(zoom>1f);
+            in.setEnabled(zoom<3f);
+        };
+        house.onZoomChanged(update);
+        update.run();
+        add(content,controls);gap(content,9);
+    }
+    private Button zoomButton(LinearLayout row,String label,String description,String tag,Runnable click){
+        Button view=button(label,false,click);view.setTag(tag);view.setContentDescription(description);
+        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(dp(label.length()>1?70:48),dp(48));params.leftMargin=dp(5);row.addView(view,params);
+        return view;
+    }
+    private LinearLayout boilerRoom(HouseTelemetry telemetry,Instant now) {
+        LinearLayout boilerRoom=card();
+        boilerRoom.setTag("house-boiler-room");
+        add(boilerRoom,text("Kotlovnica",20,INK,true));
+        gap(boilerRoom,9);
+        add(boilerRoom,HouseSectionView.boilerRoomIllustration(this,houseArtwork));
+        gap(boilerRoom,10);
+        equipment(boilerRoom,"Kotao",telemetry.boiler,now);
+        gap(boilerRoom,8);
+        bufferTanks(boilerRoom,telemetry,now);
+        gap(boilerRoom,8);
+        equipment(boilerRoom,"Sanitarna voda",telemetry.sanitary,now);
+        gap(boilerRoom,8);
+        equipment(boilerRoom,"Toplinska pumpa",telemetry.heatPump,now);
+        gap(boilerRoom,16);
+        add(boilerRoom,text("Cirkulacijske pumpe",17,INK,true));
+        gap(boilerRoom,6);
+        for(int i=0;i<HouseTelemetry.PUMP_NAMES.length;i++) addPumpStatus(boilerRoom,telemetry,i,now);
+        return boilerRoom;
+    }
+    private void equipment(LinearLayout parent,String name,HouseTelemetry.Reading value,Instant now) {
+        LinearLayout card=deviceCard(name);
+        reading(card,"Temperatura",value,now);
+        add(parent,card);
+    }
+    private LinearLayout deviceCard(String name) {
+        LinearLayout card=column();
+        card.setBackground(bg(0xff20323c,12));
+        card.setPadding(dp(12),dp(10),dp(12),dp(11));
+        add(card,text(name,15,INK,true));
+        return card;
+    }
+    private void bufferTanks(LinearLayout parent,HouseTelemetry telemetry,Instant now) {
+        LinearLayout large=bufferCard("Pufer 2.000 L",telemetry.buffer,now);
+        LinearLayout small=bufferCard("Pufer 1.000 L",telemetry.bufferTwo,now);
+        if(getResources().getConfiguration().screenWidthDp<390 ||
+                getResources().getConfiguration().fontScale>1.15f) {
+            add(parent,large);
+            gap(parent,8);
+            add(parent,small);
+            return;
+        }
+        LinearLayout tanks=row();
+        tanks.setGravity(Gravity.TOP);
+        tanks.addView(large,new LinearLayout.LayoutParams(0,-1,1));
+        LinearLayout.LayoutParams second=new LinearLayout.LayoutParams(0,-1,1);
+        second.leftMargin=dp(8);
+        tanks.addView(small,second);
+        add(parent,tanks);
+    }
+    private LinearLayout bufferCard(String name,HouseTelemetry.Reading[] values,Instant now) {
+        LinearLayout card=deviceCard(name);
+        reading(card,"Vrh",values[0],now);
+        reading(card,"Sredina",values[1],now);
+        reading(card,"Dno",values[2],now);
+        return card;
+    }
+    private void addPumpStatus(LinearLayout parent,HouseTelemetry telemetry,int index,Instant now) {
+        HouseTelemetry.Reading reading=telemetry.pumpReadings[index];
+        HouseTelemetry.Pump mode=telemetry.pumpState(index,now);
+        boolean fresh=reading.age(now)==HouseTelemetry.Age.FRESH;
+        String label=mode==HouseTelemetry.Pump.UNKNOWN?"Nepoznato":(fresh?"":"Zadnje: ")+(mode==HouseTelemetry.Pump.ON?"Radi":"Miruje");
+        int color=!fresh?MUTED:mode==HouseTelemetry.Pump.ON?0xff76ddac:0xffff9d9b;
+        LinearLayout line=row();
+        line.setMinimumHeight(dp(38));
+        line.addView(new CirculationPumpView(this,telemetry,index),new LinearLayout.LayoutParams(dp(32),dp(32)));
+        TextView name=text(HouseTelemetry.PUMP_NAMES[index],13,INK,true);
+        name.setPadding(dp(8),0,dp(8),0);
+        line.addView(name,weight());
+        line.addView(text(label,12,color,true));
+        add(parent,line);
+        if(reading.age(now)==HouseTelemetry.Age.OLD) add(parent,text(reading.tag(now),11,MUTED,false));
+    }
+    private void metricAccent(LinearLayout parent,String label,String value,int color){
+        LinearLayout r=row();r.addView(text(label,12,MUTED,false),weight());TextView valueView=text(value,14,color,true);valueView.setGravity(Gravity.END);r.addView(valueView);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(8);parent.addView(r,lp);
+    }
+    private void reading(LinearLayout parent,String label,HouseTelemetry.Reading value,Instant now){
+        metricAccent(parent,label,HouseTelemetry.degrees(value.value),HouseTelemetry.valueColor(value,INK,now));
+        String note=value.tag(now);if(!note.isEmpty()&&Double.isFinite(value.value))add(parent,text(note,11,MUTED,false));
+    }
+    private void houseTimestamps(HouseTelemetry telemetry,Instant now) {
+        String[] names={"Solarni kolektori","1. kat · sobna","1. kat · zadana","1. kat · polaz",
+                "Prizemlje · sobna","Prizemlje · zadana","Prizemlje · polaz"};
+        HouseTelemetry.Reading[] readings={telemetry.collector,telemetry.kat,telemetry.katTarget,telemetry.katSupply,
+                telemetry.prizemlje,telemetry.prizemljeTarget,telemetry.prizemljeSupply};
+        LinearLayout timestamps=null;
+        for(int i=0;i<readings.length;i++){
+            if(readings[i].age(now)!=HouseTelemetry.Age.OLD) continue;
+            if(timestamps==null){
+                timestamps=card();
+                timestamps.setTag("house-old-readings");
+                add(timestamps,text("Zadnja očitanja",14,INK,true));
+            }
+            gap(timestamps,5);
+            add(timestamps,text(names[i]+" · "+readings[i].tag(now),11,MUTED,false));
+        }
+    }
+    private void houseReadings(HouseTelemetry t,Instant now){
+        String[] names={"Kat · izmjereno","Kat · zadano","Prizemlje · izmjereno","Prizemlje · zadano","Peć","Sanitarna voda","Solarni kolektori","Pufer 2.000 L · vrh","Pufer 2.000 L · sredina","Pufer 2.000 L · dno","Pufer 1.000 L · vrh","Pufer 1.000 L · sredina","Pufer 1.000 L · dno","Dizalica topline","Polaz · kat","Polaz · prizemlje","Polaz · prizemlje 2","Dodatni senzor 1"};
+        HouseTelemetry.Reading[] values={t.kat,t.katTarget,t.prizemlje,t.prizemljeTarget,t.boiler,t.sanitary,t.collector,t.buffer[0],t.buffer[1],t.buffer[2],t.bufferTwo[0],t.bufferTwo[1],t.bufferTwo[2],t.heatPump,t.katSupply,t.prizemljeSupply,t.extraSupply,t.extraSensor};
+        int firstExtra=values.length-2;
+        boolean anyExtraOld=t.extraSupply.age(now)==HouseTelemetry.Age.OLD||t.extraSensor.age(now)==HouseTelemetry.Age.OLD;
+        LinearLayout readings=card();
+        add(readings,text("Temperaturna očitanja",17,INK,true));
+        if(houseDetails||anyExtraOld){
+            for(int i=houseDetails?0:firstExtra;i<names.length;i++)
+                if(houseDetails||values[i].age(now)==HouseTelemetry.Age.OLD)reading(readings,names[i],values[i],now);
+            gap(readings,10);
+        }
+        add(readings,text(DevelopmentMode.enabled()?"DEMO · postojeća očitanja i ilustrativni uređaji simulirani su za razvoj.":"Pufer 1.000 L: tri mjesta rezervirana za buduće senzore. Očitanje dizalice topline nije dostupno.",12,MUTED,false));
+    }
+    private void weatherCard(HouseTelemetry telemetry,Instant now){
+        LinearLayout c=card();c.setTag("ozalj-weather");
+        LinearLayout heading=row();heading.addView(text("Vrijeme · Ozalj",17,INK,true),weight());heading.addView(new WeatherIconView(this,weather),new LinearLayout.LayoutParams(dp(32),dp(32)));add(c,heading);
+        reading(c,"Vanjski senzor grijanja",telemetry.outside,now);
+        if(weather==null){gap(c,9);add(c,text(weatherError.isEmpty()?"Dohvaćam vremenske podatke…":"Vremenski podatci trenutačno nisu dostupni.",12,MUTED,false));return;}
+        boolean weatherOld=Duration.between(weather.time.atZone(ZoneId.of("Europe/Zagreb")).toInstant(),now).toMinutes()>35;
+        metricAccent(c,weather.conditions()+" · prognoza",HouseTelemetry.degrees(weather.outside),weatherOld?MUTED:INK);
+        gap(c,8);add(c,text((DevelopmentMode.enabled()?"DEMO · testno vrijeme":"Open-Meteo · "+weather.timestamp())+(weatherOld||!weatherError.isEmpty()?" · posljednja prognoza":""),10,MUTED,false));
+        if(weatherDetails){
+        metric(c,"Osjećaj",HouseTelemetry.degrees(weather.feelsLike));
+        metric(c,"Vlaga · vjetar",withUnit(weather.humidity,0,"%")+" · "+withUnit(weather.wind,0,"km/h"));
+        metric(c,"Tlak",withUnit(weather.pressure,0,"hPa"));
+        metric(c,"Min. / maks.",HouseTelemetry.degrees(weather.low)+" / "+HouseTelemetry.degrees(weather.high));
+        metric(c,"Vjerojatnost oborina danas",withUnit(weather.rainChance,0,"%"));
+        metric(c,"Izlazak / zalazak",weather.sunrise+" / "+weather.sunset);
+        }
+        gap(c,8);add(c,button(weatherDetails?"Sakrij detalje vremena":"Detalji vremena",false,()->{weatherDetails=!weatherDetails;render(true);}));
+    }
+    private String withUnit(double value,int digits,String unit){return Double.isFinite(value)?num(value,digits)+" "+unit:"—";}
     private void module(LinearLayout parent,String id,String title,String subtitle,int icon,int accent){LinearLayout c=column();c.setPadding(dp(15),dp(17),dp(15),dp(17));c.setBackground(bg(WHITE,21));c.setTag("module-"+id);c.setClickable(true);c.setFocusable(true);c.setContentDescription(title);c.setMinimumHeight(dp(155));c.addView(new NavIconView(this,icon,accent),new LinearLayout.LayoutParams(dp(30),dp(30)));gap(c,17);add(c,text(title,16,INK,true));gap(c,7);add(c,text(subtitle,11,MUTED,false));gap(c,12);add(c,text("Otvori  ›",12,accent,true));c.setOnClickListener(v->navigate(id));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);lp.bottomMargin=dp(13);if(parent.getChildCount()==0)lp.rightMargin=dp(6);else lp.leftMargin=dp(6);parent.addView(c,lp);}
     private void zones(){title("Toplina pod kontrolom","Centralno grijanje","Etaže, temperature, pumpe i spremnici vašeg sustava.");if(status==null){if(statusLoading||errorText.isEmpty())loading("Dohvaćam grijanje…");else unavailable("Nema očitanja",errorText,()->loadStatus(true));return;}syncWarning();zoneCard("kat");zoneCard("prizemlje");section("Srce vašeg sustava");systemCards();diagnostics();}
     private void solar(){
@@ -200,15 +377,32 @@ public final class MainActivity extends Activity {
     private void header(){if(connection==null)return;connection.setText(statusLoading&&status==null?"● Povezivanje sa sustavom…":online?"● Grijanje povezano · pojedinosti":status==null?"● Grijanje bez veze · pojedinosti":"● Grijanje · posljednja očitanja");connection.setTextColor(online?GREEN:AMBER);progress.setVisibility(activeRequests>0?View.VISIBLE:View.INVISIBLE);refresh.setEnabled(!saving);saveState();}
     private <T> void task(Callable<T> work,Consumer<T> success,Consumer<Exception> failure){if(destroyed)return;activeRequests++;header();executor.execute(()->{T result=null;Exception error=null;try{result=work.call();}catch(Exception e){error=e;}T data=result;Exception problem=error;ui.post(()->{if(destroyed)return;activeRequests--;if(problem==null)success.accept(data);else failure.accept(problem);header();});});}
     private void loadStatus(boolean manual){if(statusLoading||saving)return;statusLoading=true;task(repository::status,data->{statusLoading=false;status=data;online=true;errorText="";lastRead=System.currentTimeMillis();if(page.equals("overview")||page.equals("zones"))render(true);if(manual)toast("Očitanja su osvježena.");},e->{statusLoading=false;online=false;errorText=e.getMessage()==null?"Provjerite internetsku vezu.":e.getMessage();if(page.equals("overview")||page.equals("zones"))render(true);if(manual)toast(errorText);});}
+    private void loadHouse(){
+        if(saving)return;
+        if(!houseLoading){houseLoading=true;task(()->DevelopmentMode.enabled()?DevelopmentMode.houseData(false):repository.telemetry(false),
+                data->{houseLoading=false;houseData=data;houseError="";if(page.equals("overview"))render(true);},
+                e->{houseLoading=false;houseError="Temperature trenutačno nisu dostupne.";if(page.equals("overview"))render(true);});}
+        if(!pumpsLoading){pumpsLoading=true;task(()->DevelopmentMode.enabled()?DevelopmentMode.houseData(true):repository.telemetry(true),
+                data->{pumpsLoading=false;housePumps=data;pumpsError="";if(page.equals("overview"))render(true);},
+                e->{pumpsLoading=false;pumpsError="Pumpe trenutačno nisu dostupne.";if(page.equals("overview"))render(true);});}
+    }
+    private void loadWeather(boolean manual){
+        Instant now=Instant.now();
+        if(weatherLoading||saving||!manual&&Duration.between(lastWeatherAttempt,now).getSeconds()<(weatherError.isEmpty()?600:180))return;
+        weatherLoading=true;lastWeatherAttempt=now;
+        task(()->DevelopmentMode.enabled()?DevelopmentMode.weatherData():weatherSource.read(),
+                data->{weatherLoading=false;weather=data;weatherError="";if(page.equals("overview"))render(true);},
+                e->{weatherLoading=false;weatherError="Vremenski podatci trenutačno nisu dostupni.";if(page.equals("overview"))render(true);});
+    }
     private void loadSchedule(String id){if(loadingSchedules.contains(id)||saving)return;loadingSchedules.add(id);if(page.equals("schedule")&&zone.equals(id)&&!schedules.containsKey(id))render(true);task(()->repository.schedule(id),data->{loadingSchedules.remove(id);boolean hadChanges=changes(id)>0;schedules.put(id,data);if(!hadChanges||!drafts.containsKey(id))drafts.put(id,sourceValues(data));if(page.equals("schedule")&&zone.equals(id)||page.equals("overview")||page.equals("zones"))render(true);},e->{loadingSchedules.remove(id);if(page.equals("schedule")&&zone.equals(id)){render(true);toast(e.getMessage());}});}
     private void loadSettings(){if(settingsLoading||saving)return;settingsLoading=true;if(page.equals("settings")&&settings==null)render(true);task(repository::settings,data->{settingsLoading=false;boolean hadChanges=settingsDirty();settings=data;if(!hadChanges||settingsDraft==null)settingsDraft=settingValues(data);if(page.equals("settings"))render(true);},e->{settingsLoading=false;if(page.equals("settings")){render(true);toast(e.getMessage());}});}
     private void loadChart(String id){if(loadingCharts.contains(id)||saving)return;loadingCharts.add(id);if(page.equals("charts")&&chartId.equals(id)&&!charts.containsKey(id))render(true);task(()->repository.chart(id),data->{loadingCharts.remove(id);charts.put(id,data);if(page.equals("charts")&&chartId.equals(id))render(true);},e->{loadingCharts.remove(id);if(page.equals("charts")&&chartId.equals(id)){render(true);toast(e.getMessage());}});}
-    private void refreshAll(boolean manual){loadStatus(manual);if(page.equals("schedule"))loadSchedule(zone);if(page.equals("settings"))loadSettings();if(page.equals("charts"))loadChart(chartId);if(page.equals("solar"))loadSolar();}
+    private void refreshAll(boolean manual){loadStatus(manual);if(page.equals("overview")){loadHouse();loadWeather(manual);}if(page.equals("schedule"))loadSchedule(zone);if(page.equals("settings"))loadSettings();if(page.equals("charts"))loadChart(chartId);if(page.equals("solar"))loadSolar();}
     private void toast(String message){if(!destroyed)Toast.makeText(this,message==null?"Zahtjev nije uspio.":message,Toast.LENGTH_LONG).show();}
     private void back(){if(saving){toast("Pričekajte potvrdu spremanja.");return;}if(dialog!=null&&dialog.isShowing()){dialog.dismiss();return;}if(!page.equals("overview")){navigate("overview");return;}if(dirty()){dialog=new AlertDialog.Builder(this).setTitle("Zatvoriti aplikaciju?").setMessage("Nespremljene promjene bit će odbačene. Grijanje nastavlja raditi prema spremljenim postavkama.").setNegativeButton("Natrag",null).setPositiveButton("Zatvori",(d,w)->finish()).create();dialog.show();}else finish();}
     @Override public void onBackPressed(){back();}
     @Override protected void onPause(){if(cameraPanel!=null)cameraPanel.onHostPause();resumed=false;ui.removeCallbacks(poll);super.onPause();}
-    @Override protected void onResume(){super.onResume();resumed=true;if(cameraPanel!=null)cameraPanel.onHostResume();if(repository!=null&&System.currentTimeMillis()-lastRead>20000)loadStatus(false);ui.removeCallbacks(poll);ui.postDelayed(poll,90000);}
+    @Override protected void onResume(){super.onResume();resumed=true;if(cameraPanel!=null)cameraPanel.onHostResume();if(repository!=null&&System.currentTimeMillis()-lastRead>20000){loadStatus(false);if(page.equals("overview")){loadHouse();loadWeather(false);}}ui.removeCallbacks(poll);ui.postDelayed(poll,90000);}
     @Override public void onConfigurationChanged(Configuration config){super.onConfigurationChanged(config);render(true);}
     @Override protected void onDestroy(){if(cameraPanel!=null)cameraPanel.close();destroyed=true;ui.removeCallbacksAndMessages(null);executor.shutdownNow();if(Build.VERSION.SDK_INT>=33&&backCallback!=null)getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);super.onDestroy();}
     @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);out.putString("page",page);out.putString("zone",zone);out.putString("chart",chartId);out.putInt("period",period);if(status!=null)out.putString("status",status.toString());if(settings!=null)out.putString("settings",settings.toString());if(settingsDraft!=null)out.putString("settingsDraft",settingsDraft.toString());for(String id:new String[]{"kat","prizemlje"}){if(schedules.containsKey(id))out.putString(id,schedules.get(id).toString());if(drafts.containsKey(id))out.putDoubleArray(id+"Draft",drafts.get(id));}out.putString("pendingCsv",pendingCsv);}

@@ -70,6 +70,46 @@ public static class NativeVerification
         var inner = JsonSerializer.Serialize(new { stationOverview = new { stationName = "Demo elektrana · provjera izgleda" }, realKpi = new { realTimePower = 3.24, dailyEnergy = 18.7, monthEnergy = 436.2, yearEnergy = 5032.8, cumulativeEnergy = 12784.6 }, socialContribution = new { co2Reduction = 5420.3, standardCoalSavings = 2140.6, equivalentTreePlanting = 312 }, powerCurve = new { xAxis = Enumerable.Range(0, 24).Select(i => i.ToString("00") + ":00"), activePower = Enumerable.Range(0, 24).Select(i => i < 6 || i > 18 ? "-" : (Math.Sin((i - 6) / 12d * Math.PI) * 4.2).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)) } });
         return SolarRepository.Parse(JsonSerializer.Serialize(new { success = true, data = WebUtility.HtmlEncode(inner) }));
     }
+
+    internal static (HouseTelemetry Telemetry, IReadOnlyDictionary<string, HouseReading<bool>> Pumps, OzaljWeather Weather) HouseFixture()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var clock = new DateTime(2026, 11, 16, 15, 39, 0);
+        string Time(int minutes) => clock.AddMinutes(-minutes).ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+        using var readings = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            success = true,
+            server_time = Time(0),
+            latest = new[]
+            {
+                ("house/outdoor/temp", "9.4", 1), ("house/kotal/temp", "66.2", 1), ("house/dhw/temp", "51.6", 1),
+                ("house/solar/temp", "32.5", 15), ("house/puffer/top", "62.3", 1), ("house/puffer/midd", "48.7", 1),
+                ("house/puffer/bottom", "36.4", 4), ("house/polaz_kat/temp", "35.8", 1), ("house/polaz_priz/temp", "34.5", 1),
+                ("house/polaz_priz2/temp", "32.9", 16), ("house/sensor1/temp", "19.4", 18)
+            }.Select(value => new { topic = value.Item1, temperature = value.Item2, received_at = Time(value.Item3) }),
+            room_latest = new[]
+            {
+                new { room = "kat", temperature = "22.3", setpoint = "22", received_at = Time(1) },
+                new { room = "prizemlje", temperature = "21.7", setpoint = "22.5", received_at = Time(1) }
+            }
+        }));
+        using var pumps = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            success = true,
+            server_time = Time(0),
+            pumps = new[] { ("kotao", 1, 1), ("prizemlje", 1, 4), ("kat", 1, 1), ("sanitarna", 0, 1), ("solar", 0, 13) }
+                .Select(x => new { pump = x.Item1, state = x.Item2, updated_at = Time(x.Item3) })
+        }));
+        using var weather = JsonDocument.Parse("""
+        {"current":{"time":"2026-11-16T15:30","temperature_2m":10.2,"apparent_temperature":8.1,"relative_humidity_2m":71,
+        "weather_code":2,"is_day":1,"wind_speed_10m":8.6,"pressure_msl":1018.4},
+        "hourly":{"time":["2026-11-16T14:00","2026-11-16T15:00"],"precipitation_probability":[12,24]},
+        "daily":{"time":["2026-11-16","2026-11-17","2026-11-18","2026-11-19","2026-11-20"],"weather_code":[2,61,3,0,45],
+        "temperature_2m_max":[11.8,9.2,10.3,12.5,8.3],"temperature_2m_min":[6.1,5.3,3.6,4.2,2.8],"precipitation_probability_max":[24,84,28,3,17]}}
+        """);
+        return (HouseTelemetrySource.ParseTemperatures(readings.RootElement, now), HouseTelemetrySource.ParsePumps(pumps.RootElement, now), HouseTelemetrySource.ParseWeather(weather.RootElement));
+    }
+
     public static async Task TestCore()
     {
         var checks = 0;
@@ -77,6 +117,23 @@ public static class NativeVerification
         void Reject(Action action, string name) { try { action(); } catch { checks++; return; } throw new Exception("Expected rejection: " + name); }
         var status = HeatingParser.Status(StatusHtml);
         Check(status.Zones.Count == 2 && status.Zones[0].Temperature == 22.3 && status.BufferMiddle == 49.2 && status.BoilerPump == true, "all heating status");
+        var (house, pumps, ozalj) = HouseFixture();
+        Check(house.Room("kat")?.Measured.Value == 22.3 && house.Room("kat")?.Target.Value == 22 && house.Room("prizemlje")?.Target.Value == 22.5,
+            "house separates the two thermostat targets from heating water values");
+        Check(house.Temperature("house/outdoor/temp")?.Value == 9.4 && house.Temperature("house/puffer/midd")?.Value == 48.7 && house.Temperature("house/heatpump/temp") == null,
+            "house preserves measured outdoor and 2000 L puffer readings and does not infer the heat pump");
+        Check(pumps.Count == 5 && pumps["kotao"].Value == true && pumps["sanitarna"].Value == false,
+            "actual JSON on and off pump states remain distinct");
+        var checkedAt = pumps["kat"].FetchedAt;
+        Check(pumps["kat"].Age(checkedAt.AddMinutes(2)) == ReadingAge.Current && pumps["kat"].Age(checkedAt.AddMinutes(2).AddSeconds(1)) == ReadingAge.Muted &&
+            pumps["kat"].Age(checkedAt.AddMinutes(9)) == ReadingAge.Muted && pumps["kat"].Age(checkedAt.AddMinutes(9).AddSeconds(1)) == ReadingAge.Outdated,
+            "source sample age plus elapsed time uses strict three- and ten-minute thresholds");
+        using var invalidPump = JsonDocument.Parse("""{"success":true,"server_time":"2026-11-16 15:39:00","pumps":[{"pump":"kat","state":2,"updated_at":"2026-11-16 15:38:00"}]}""");
+        var unknownPump = HouseTelemetrySource.ParsePumps(invalidPump.RootElement, checkedAt);
+        Check(unknownPump["kat"].Value == null && unknownPump["kat"].Age(checkedAt) == ReadingAge.Unknown && !unknownPump.ContainsKey("kotao"),
+            "unknown and missing pumps are never rendered as off");
+        Check(ozalj.Temperature == 10.2 && ozalj.RainChance == 24 && ozalj.Days.Count == 5 && ozalj.Days[1].Code == 61,
+            "Ozalj weather selects matching hour and forecast slices");
         Reject(() => HeatingParser.Status("<html>unrelated page</html>"), "no invented status");
         Reject(() => HeatingParser.Status("<input type='password'>"), "login detected");
         var schedule = HeatingParser.Schedule(ScheduleHtml("kat"), "kat");
@@ -106,10 +163,13 @@ public static class NativeVerification
             try { CameraEngine.ParseLoginResponse(HttpStatusCode.Unauthorized, raw); throw new Exception("Expected authentication failure"); }
             catch (CameraEngineException e) { Check(!e.Message.Contains(raw, StringComparison.Ordinal), "raw provider errors not exposed"); }
         Reject(() => CameraEngine.ParseLoginResponse(HttpStatusCode.InternalServerError, "private provider body"), "Xiaomi server failure");
-        var release = JsonSerializer.Serialize(new { tag_name = "v2.1.0", draft = false, prerelease = false, assets = new[] { new { name = "TermoDom-Windows.zip", size = 100, digest = "sha256:" + new string('a', 64), browser_download_url = "https://github.com/leo25matko-boop/termo/releases/download/v2.1.0/TermoDom-Windows.zip" } } });
+        var installed = GitHubUpdateService.CurrentVersion;
+        var nextVersion = new Version(installed.Major, installed.Minor, installed.Build + 1);
+        var updateTag = "v" + nextVersion.ToString(3);
+        var release = JsonSerializer.Serialize(new { tag_name = updateTag, draft = false, prerelease = false, assets = new[] { new { name = "TermoDom-Windows.zip", size = 100, digest = "sha256:" + new string('a', 64), browser_download_url = $"https://github.com/leo25matko-boop/termo/releases/download/{updateTag}/TermoDom-Windows.zip" } } });
         var package = GitHubUpdateService.SelectPackage(release, GitHubUpdateService.CurrentVersion);
-        Check(package?.Version == new Version(2, 1, 0) && package.Size == 100, "native GitHub update metadata");
-        Check(GitHubUpdateService.SelectPackage(release, new Version(2, 1, 0)) == null, "same version not redownloaded");
+        Check(package?.Version == nextVersion && package.Size == 100, "native GitHub update metadata");
+        Check(GitHubUpdateService.SelectPackage(release, nextVersion) == null, "same version not redownloaded");
         Reject(() => GitHubUpdateService.SelectPackage(release.Replace("sha256:", "unknown:"), GitHubUpdateService.CurrentVersion), "update must have published SHA256");
         Reject(() => GitHubUpdateService.SelectPackage(release.Replace("https://github.com/", "https://example.com/"), GitHubUpdateService.CurrentVersion), "foreign update download rejected");
         Reject(() => GitHubUpdateService.ValidateHash(new byte[32], new string('a', 64)), "corrupt update hash rejected");

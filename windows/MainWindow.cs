@@ -31,8 +31,18 @@ public sealed class MainWindow : Window
     readonly Dictionary<string, Schedule> schedules = [];
     readonly Dictionary<string, double[]> drafts = [];
     readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(90) };
+    readonly DispatcherTimer readingClock = new() { Interval = TimeSpan.FromSeconds(10) };
+    readonly CancellationTokenSource dashboardLifetime = new();
+    readonly HouseZoomState houseZoom = new();
     HeatingStatus? status;
     SolarData? solar;
+    HouseTelemetry? houseTelemetry;
+    IReadOnlyDictionary<string, HouseReading<bool>> housePumps = new Dictionary<string, HouseReading<bool>>();
+    OzaljWeather? weather;
+    DateTimeOffset? dashboardFetched, solarFetched, weatherFetched;
+    string? telemetryIssue, pumpIssue, solarIssue, weatherIssue;
+    string? displayAges;
+    bool dashboardRefreshing, solarRefreshing;
     SettingsData? settings;
     string[]? settingDraft;
     ChartData? chart;
@@ -63,17 +73,50 @@ public sealed class MainWindow : Window
         var identity = new StackPanel(); identity.Children.Add(T("VAŠ DOM, NA JEDNOM MJESTU", 11, Mint, true));
         identity.Children.Add(T(DateTime.Now.ToString("dddd, d. MMMM yyyy.", Hr), 15)); identity.Children.Add(freshness); header.Children.Add(identity);
         DockPanel.SetDock(footer, Dock.Bottom); main.Children.Add(footer);
+        var noticeStyle = new Style(typeof(TextBlock));
+        var noNotice = new DataTrigger { Binding = new System.Windows.Data.Binding(nameof(TextBlock.Text)) { RelativeSource = System.Windows.Data.RelativeSource.Self }, Value = "" };
+        noNotice.Setters.Add(new Setter(VisibilityProperty, Visibility.Collapsed));
+        noticeStyle.Triggers.Add(noNotice);
+        notice.Style = noticeStyle;
         DockPanel.SetDock(notice, Dock.Top); main.Children.Add(notice);
         scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, 10, 0) };
         main.Children.Add(scroll);
-        Loaded += async (_, _) => { if (verification) { solar = NativeVerification.SolarFixture(); await LoadStatus(); notice.Text = "DEMO · testni podaci. Nema povezivanja sa stvarnim uređajima; spremanje u regulator je blokirano."; } else { if (updates?.Enabled == true) _ = updates.CheckAsync(); await LoadStatus(); timer.Start(); } };
-        timer.Tick += async (_, _) => { if (IsActive && !saving) { await LoadStatus(false); if (page == "solar" && solarRepository.SharedUrl != null) await LoadSolar(false); } };
-        Activated += async (_, _) => { if (!verification && fetchedAt.HasValue && DateTime.Now - fetchedAt.Value > TimeSpan.FromSeconds(90) && !saving) await LoadStatus(false); };
+        Loaded += async (_, _) =>
+        {
+            if (verification)
+            {
+                await LoadDashboard();
+                await LoadStatus();
+                notice.Text = "DEMO · testni podaci. Nema povezivanja sa stvarnim uređajima; spremanje u regulator je blokirano.";
+                return;
+            }
+            if (updates?.Enabled == true) _ = updates.CheckAsync();
+            timer.Start();
+            readingClock.Start();
+            await LoadDashboard();
+        };
+        timer.Tick += async (_, _) =>
+        {
+            if (!IsActive || saving) return;
+            if (page == "home") await LoadDashboard();
+            else if (page == "solar" && solarRepository.SharedUrl != null) await LoadSolar(false);
+            else await LoadStatus(false);
+        };
+        readingClock.Tick += (_, _) =>
+        {
+            if (page == "home" && !dashboardRefreshing && displayAges != DashboardAges()) Render();
+        };
+        Activated += async (_, _) =>
+        {
+            if (verification || saving) return;
+            if (page == "home" && dashboardFetched is DateTimeOffset home && DateTimeOffset.UtcNow - home > TimeSpan.FromSeconds(90)) await LoadDashboard();
+            else if (page == "heating" && fetchedAt.HasValue && DateTime.Now - fetchedAt.Value > TimeSpan.FromSeconds(90)) await LoadStatus(false);
+        };
         Closing += (_, e) =>
         {
             if (saving) { e.Cancel = true; return; }
             if (!verification && IsDirty() && MessageBox.Show(this, "Postoje nespremljene promjene. Zatvoriti aplikaciju i odbaciti ih?", "TermoDom", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) e.Cancel = true;
-            if (!e.Cancel) timer.Stop();
+            if (!e.Cancel) { timer.Stop(); readingClock.Stop(); dashboardLifetime.Cancel(); }
         };
         Closed += async (_, _) => { if (cameraPanel != null) try { await cameraPanel.DisposeAsync(); } catch { } };
         Render();
@@ -98,7 +141,7 @@ public sealed class MainWindow : Window
     {
         var sidebar = new DockPanel { Background = Color("#14202B"), Margin = new Thickness(0) }; layout.Children.Add(sidebar);
         var brand = Stack(T("◉  TermoDom", 24, Mint, true), T("PAMETNI DOM", 10, Muted)); brand.Margin = new Thickness(24, 31, 16, 35); DockPanel.SetDock(brand, Dock.Top); sidebar.Children.Add(brand);
-        var meta = Stack(T("Izvorna Windows aplikacija", 11, Muted), T("Verzija 2.0.0", 11, Muted)); meta.Margin = new Thickness(24, 18, 16, 22); DockPanel.SetDock(meta, Dock.Bottom); sidebar.Children.Add(meta);
+        var meta = Stack(T("Izvorna Windows aplikacija", 11, Muted), T($"Verzija {GitHubUpdateService.CurrentVersion.ToString(3)}", 11, Muted)); meta.Margin = new Thickness(24, 18, 16, 22); DockPanel.SetDock(meta, Dock.Bottom); sidebar.Children.Add(meta);
         menu.Margin = new Thickness(14, 0, 10, 0); sidebar.Children.Add(menu); RenderMenu();
     }
     void RenderMenu()
@@ -114,33 +157,46 @@ public sealed class MainWindow : Window
     {
         if (saving) return; if (page == "camera" && id != "camera" && cameraPanel != null) try { await cameraPanel.Stop(); } catch { }
         page = id; notice.Text = ""; scroll.ScrollToTop(); RenderMenu(); Render();
-        if (page == "heating") await LoadHeating();
+        if (page == "home" && (dashboardFetched == null || DateTimeOffset.UtcNow - dashboardFetched > TimeSpan.FromSeconds(90))) await LoadDashboard();
+        else if (page == "heating") await LoadHeating();
         else if (page == "solar" && solarRepository.SharedUrl != null && solar == null) await LoadSolar();
     }
     void Render()
     {
         body.Children.Clear(); footer.Children.Clear(); activeChart = null; updateStatusText = null;
         if (page == "home") Home(); else if (page == "heating") Heating(); else if (page == "solar") Solar(); else if (page == "camera") Camera(); else Prepared();
-        freshness.Text = fetchedAt.HasValue ? "Grijanje osvježeno u " + fetchedAt.Value.ToString("HH:mm:ss", Hr) : "Čekam podatke izvornog sustava";
+        if (page == "home") freshness.Text = dashboardFetched.HasValue ? "Očitanja dohvaćena u " + dashboardFetched.Value.ToLocalTime().ToString("HH:mm:ss", Hr) : "Čekam očitanja regulatora";
+        else freshness.Text = fetchedAt.HasValue ? "Grijanje osvježeno u " + fetchedAt.Value.ToString("HH:mm:ss", Hr) : "Čekam podatke izvornog sustava";
     }
     void Home()
     {
-        Heading("Dobar dan. Dobro došli kući.", "Pregled grijanja, energije i povezanih uređaja.");
-        var overview = Stack(T("CENTRALNO GRIJANJE", 11, Mint, true), T("Ugodan dom. Jasne informacije.", 25, null, true), T("Temperature i stanja prikazani su iz vašeg postojećeg sustava.", 14, Muted));
-        overview.Children.Add(new Border { Height = 15 });
-        var zoneGrid = new UniformGrid { Columns = 2 };
-        foreach (var id in new[] { "kat", "prizemlje" })
+        var title = T("Presjek kuće", 31, null, true);
+        title.Margin = new Thickness(0, 0, 0, 12);
+        var heading = new DockPanel();
+        if (verification)
         {
-            var z = status?.Zones.FirstOrDefault(z => z.Id == id);
-            var block = Stack(T(z?.Name ?? (id == "kat" ? "Kat" : "Prizemlje"), 16, Muted), T(N(z?.Temperature), 42, null, true), T("Voda " + N(z?.Water) + "  ·  Cilj " + N(z?.Planned), 13, Muted), T("Pumpa · " + Device(z?.Pump), 12, z?.Pump == true ? Mint : Muted));
-            var button = Button("Otvori grijanje  →", async () => { zone = id; heatingTab = "zones"; await Navigate("heating"); }); block.Children.Add(button); zoneGrid.Children.Add(block);
+            var demo = T("DEMO · Primjer očitanja", 12, Amber, true);
+            demo.VerticalAlignment = VerticalAlignment.Center;
+            DockPanel.SetDock(demo, Dock.Right);
+            heading.Children.Add(demo);
         }
-        overview.Children.Add(zoneGrid); body.Children.Add(Card(overview, "#3C655B"));
-        body.Children.Add(Tiles(3, Metric("Vanjska temperatura", status?.Outside), Metric("Peć", status?.Boiler, accent: Amber), Metric("Sanitarna voda", status?.Sanitary, accent: Color("#8CAEE8"))));
-        var solarCard = Stack(T("☀  SOLARNA ELEKTRANA", 12, Amber, true), T(solar != null ? N(solar.Power, "kW") : "FusionSolar", 26, null, true), T(solar != null ? "Danas " + N(solar.Daily, "kWh") : solarRepository.SharedUrl != null ? "Povezivanje je spremljeno" : "Povežite postojeći kiosk bez API ključa", 13, Muted), Button("Pregled elektrane  →", () => Navigate("solar")));
-        var cameraCard = Stack(T("◉  XIAOMI MI 360", 12, Mint, true), T("Vaša kamera", 26, null, true), T("Izvorna Xiaomi Home prijava i dozvole.", 13, Muted), Button("Otvori kameru  →", () => Navigate("camera")));
-        body.Children.Add(Tiles(2, Card(solarCard), Card(cameraCard)));
-        body.Children.Add(Card(Stack(T("Spremno za vaš dom koji raste", 18, null, true), T("Rasvjeta, dodatni senzori i drugi uređaji ostaju u pripremi dok se ne povežu stvarni izvori.", 13, Muted), Button("Pogledaj pripremu  →", () => Navigate("prepared")))));
+        heading.Children.Add(title);
+        body.Children.Add(heading);
+        if (telemetryIssue != null || pumpIssue != null)
+            body.Children.Add(T(string.Join("  ·  ", new[] { telemetryIssue, pumpIssue }.Where(text => text != null)), 12, Amber));
+        var solarEmpty = solarIssue ?? (solar != null ? "" : solarRepository.SharedUrl != null ? "Učitavam FusionSolar…" : "FusionSolar nije povezan");
+        body.Children.Add(new HouseDashboard(houseTelemetry, housePumps, solar, solarFetched, solarEmpty, weather, weatherIssue, verification, houseZoom,
+            route => _ = OpenFromDashboard(route)));
+        displayAges = DashboardAges();
+        var related = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+        related.Children.Add(Button("Otvori kameru →", () => Navigate("camera"), "home-camera"));
+        related.Children.Add(Button("U pripremi →", () => Navigate("prepared"), "home-prepared"));
+        body.Children.Add(related);
+    }
+    async Task OpenFromDashboard(string route)
+    {
+        if (route == "heating") heatingTab = "zones";
+        await Navigate(route);
     }
     void Heating()
     {
@@ -258,7 +314,7 @@ public sealed class MainWindow : Window
     }
     void UpdateCard()
     {
-        var panel = Stack(T("Nadogradnje", 20, null, true), T("Verzija 2.0.0 · ZIP novije verzije automatski se preuzima s vašeg GitHub repozitorija. Instalaciju pokrećete sami.", 13, Muted));
+        var panel = Stack(T("Nadogradnje", 20, null, true), T($"Verzija {GitHubUpdateService.CurrentVersion.ToString(3)} · ZIP novije verzije automatski se preuzima s vašeg GitHub repozitorija. Instalaciju pokrećete sami.", 13, Muted));
         var automatic = new CheckBox { Content = "Automatski provjeri i preuzmi ZIP pri pokretanju", IsChecked = updates?.Enabled ?? true, IsEnabled = !verification };
         automatic.Checked += (_, _) => { try { updates?.SetEnabled(true); } catch { ShowNotice("Postavka nadogradnje nije spremljena.", true); } };
         automatic.Unchecked += (_, _) => { try { updates?.SetEnabled(false); } catch { ShowNotice("Postavka nadogradnje nije spremljena.", true); } };
@@ -323,7 +379,7 @@ public sealed class MainWindow : Window
         body.Children.Add(Tiles(3, Metric("Ukupna energija", solar.Total, "kWh", Mint, "Od puštanja elektrane u rad"), Metric("Smanjenje CO₂", solar.Co2, "kg", Mint, "FusionSolar pokazatelj"), Metric("Ušteda ugljena", solar.Coal, "kg", Mint, "FusionSolar pokazatelj")));
         if (solar.Curve != null) { body.Children.Add(T("Proizvodnja tijekom dana", 21, null, true)); body.Children.Add(Card(new NativeChart { Data = solar.Curve })); }
         body.Children.Add(Card(Stack(T("Upravljanje inverterom · U pripremi", 18, null, true), T("Dostavljeni kiosk pruža pregled proizvodnje. Naredbe inverteru bit će dostupne kada postoji podržano povezivanje.", 13, Muted))));
-        if (!verification) body.Children.Add(Button("Promijeni ili ukloni povezivanje", () => { if (MessageBox.Show(this, "Ukloniti spremljenu FusionSolar poveznicu s ovog računala?", "Povezivanje", MessageBoxButton.YesNo) == MessageBoxResult.Yes) { solarRepository.Disconnect(); solar = null; Render(); } }));
+        if (!verification) body.Children.Add(Button("Promijeni ili ukloni povezivanje", () => { if (MessageBox.Show(this, "Ukloniti spremljenu FusionSolar poveznicu s ovog računala?", "Povezivanje", MessageBoxButton.YesNo) == MessageBoxResult.Yes) { solarRepository.Disconnect(); solar = null; solarFetched = null; solarIssue = null; Render(); } }));
     }
     async Task ImportConfiguration()
     {
@@ -346,6 +402,73 @@ public sealed class MainWindow : Window
             grid.Children.Add(Card(Stack(T("U PRIPREMI", 10, Muted, true), T(name, 21, null, true), T(description, 13, Muted))));
         body.Children.Add(grid);
     }
+    async Task LoadDashboard(bool manual = false)
+    {
+        if (dashboardRefreshing || saving || dashboardLifetime.IsCancellationRequested) return;
+        if (verification)
+        {
+            (houseTelemetry, housePumps, weather) = NativeVerification.HouseFixture();
+            solar = NativeVerification.SolarFixture();
+            dashboardFetched = solarFetched = DateTimeOffset.UtcNow;
+            if (page == "home") Render();
+            return;
+        }
+
+        dashboardRefreshing = true;
+        try
+        {
+            var cancellation = dashboardLifetime.Token;
+            var temperatures = ReadDashboard(() => HouseTelemetrySource.ReadTemperatures(cancellation), value =>
+            {
+                houseTelemetry = value;
+                telemetryIssue = null;
+                dashboardFetched = DateTimeOffset.UtcNow;
+            }, () => telemetryIssue = "Očitanja regulatora trenutačno nisu dostupna.");
+            var pumps = ReadDashboard(() => HouseTelemetrySource.ReadPumps(cancellation), value =>
+            {
+                housePumps = value;
+                pumpIssue = null;
+            }, () => pumpIssue = "Očitavanje pumpi trenutačno nije dostupno.");
+            var conditions = manual || weatherFetched == null || DateTimeOffset.UtcNow - weatherFetched > TimeSpan.FromMinutes(15)
+                ? ReadDashboard(() => HouseTelemetrySource.ReadWeather(cancellation), value =>
+                {
+                    weather = value;
+                    weatherIssue = null;
+                    weatherFetched = DateTimeOffset.UtcNow;
+                }, () => weatherIssue = "Prognoza trenutačno nije dostupna.")
+                : Task.CompletedTask;
+            var production = solarRepository.SharedUrl != null && (manual || solarFetched == null || DateTimeOffset.UtcNow - solarFetched > TimeSpan.FromMinutes(3))
+                ? ReadSolar() : Task.CompletedTask;
+            await Task.WhenAll(temperatures, pumps, conditions, production);
+            if (page == "home" && !cancellation.IsCancellationRequested) Render();
+        }
+        finally { dashboardRefreshing = false; }
+    }
+
+    async Task ReadDashboard<T>(Func<Task<T>> read, Action<T> assign, Action unavailable)
+    {
+        try { assign(await read()); }
+        catch (Exception) { if (!dashboardLifetime.IsCancellationRequested) unavailable(); }
+    }
+
+    string DashboardAges()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var fingerprint = new StringBuilder();
+        if (houseTelemetry != null)
+        {
+            foreach (var value in houseTelemetry.Temperatures.Values) fingerprint.Append((int)value.Age(now));
+            foreach (var room in houseTelemetry.Rooms.Values) fingerprint.Append((int)room.Measured.Age(now)).Append((int)room.Target.Age(now));
+        }
+        foreach (var pump in housePumps.Values) fingerprint.Append((int)pump.Age(now));
+        if (solarFetched is DateTimeOffset fetched)
+        {
+            var age = now - fetched;
+            fingerprint.Append(age > TimeSpan.FromMinutes(10) ? '3' : age > TimeSpan.FromMinutes(3) ? '2' : '1');
+        }
+        return fingerprint.ToString();
+    }
+
     async Task LoadStatus(bool render = true)
     {
         if (refreshing || saving) return; refreshing = true;
@@ -356,6 +479,11 @@ public sealed class MainWindow : Window
     async Task LoadHeating()
     {
         if (page != "heating" || saving) return;
+        if (heatingTab == "zones" && (status == null || DateTime.Now - fetchedAt > TimeSpan.FromSeconds(90)))
+        {
+            await LoadStatus(false);
+            return;
+        }
         await Run(async () =>
         {
             if (heatingTab == "schedule" && !schedules.ContainsKey(zone)) { var id = zone; var result = await repository.Schedule(id); schedules[id] = result; drafts[id] = result.Fields.Select(f => f.Value).ToArray(); }
@@ -365,14 +493,36 @@ public sealed class MainWindow : Window
         });
     }
     async Task LoadChart() { await LoadHeating(); }
+    async Task ReadSolar()
+    {
+        if (solarRefreshing) return;
+        var url = solarRepository.SharedUrl;
+        solarRefreshing = true;
+        try
+        {
+            var result = verification ? NativeVerification.SolarFixture() : await solarRepository.Read();
+            if (url != solarRepository.SharedUrl) return;
+            solar = result;
+            solarIssue = null;
+            solarFetched = DateTimeOffset.UtcNow;
+        }
+        catch (Exception) when (url == solarRepository.SharedUrl) { solarIssue = "FusionSolar trenutačno nije dostupan."; }
+        catch (Exception) { /* The connection changed while the preceding request was pending. */ }
+        finally { solarRefreshing = false; }
+    }
+
     async Task LoadSolar(bool render = true)
     {
-        await Run(async () => { solar = verification ? NativeVerification.SolarFixture() : await solarRepository.Read(); if (page == "solar" || page == "home") Render(); if (render) ShowNotice("Podatci elektrane su osvježeni."); });
+        await ReadSolar();
+        if (page is "solar" or "home") Render();
+        if (solarIssue != null) ShowNotice(solarIssue, true);
+        else if (render && solar != null) ShowNotice("Podatci elektrane su osvježeni.");
     }
     async Task RefreshCurrent()
     {
         if (saving) return;
-        if (page == "heating" && heatingTab == "schedule")
+        if (page == "home") await LoadDashboard(true);
+        else if (page == "heating" && heatingTab == "schedule")
         {
             if (ScheduleDirty(zone) && MessageBox.Show(this, "Osvježavanje će odbaciti nespremljene promjene ovog rasporeda. Nastaviti?", "Osvježavanje", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
             schedules.Remove(zone); drafts.Remove(zone); await LoadHeating();
@@ -412,7 +562,7 @@ public sealed class MainWindow : Window
     void ShowNotice(string message, bool error = false) { notice.Text = message; notice.Foreground = error ? Color("#E6B48C") : Mint; }
     public async Task VerifyNative(string directory)
     {
-        Directory.CreateDirectory(directory); await NativeVerification.TestCore(); await LoadStatus(); solar = NativeVerification.SolarFixture();
+        Directory.CreateDirectory(directory); await NativeVerification.TestCore(); await LoadDashboard(); await LoadStatus();
         await using (var engine = new CameraEngine(false))
         {
             await engine.StartAsync();
@@ -421,6 +571,65 @@ public sealed class MainWindow : Window
         foreach (var (id, sub, file) in new[] { ("home", "zones", "01-moj-dom"), ("heating", "zones", "02-grijanje"), ("heating", "schedule", "03-rasporedi"), ("heating", "charts", "04-grafikoni"), ("heating", "settings", "05-postavke"), ("solar", "zones", "06-solarna"), ("camera", "zones", "07-kamera"), ("camera", "zones", "09-kamera-postavke"), ("prepared", "zones", "08-priprema") })
         {
             heatingTab = sub; await Navigate(id); await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle); UpdateLayout();
+            if (id == "home")
+            {
+                void VerifyIllustratedLayout()
+                {
+                    FrameworkElement Element(string key) => Descendants<FrameworkElement>(this)
+                        .Single(element => AutomationProperties.GetAutomationId(element) == key);
+                    Rect Bounds(string key)
+                    {
+                        var element = Element(key);
+                        return element.TransformToAncestor(this).TransformBounds(new Rect(element.RenderSize));
+                    }
+                    var picture = Bounds("house-original-artwork");
+                    var roof = Bounds("house-roof");
+                    var upstairs = Bounds("house-floor-kat");
+                    var downstairs = Bounds("house-floor-prizemlje");
+                    var boiler = Bounds("house-boiler-room");
+                    var outdoors = Bounds("house-outside");
+                    if (Element("house-original-artwork") is not Image { Source: not null } ||
+                        picture.Width < 260 || !picture.Contains(roof) || !picture.Contains(upstairs) || !picture.Contains(downstairs) ||
+                        roof.Bottom >= upstairs.Top || upstairs.Bottom >= downstairs.Top ||
+                        picture.Right >= boiler.Left || outdoors.Bottom >= boiler.Top)
+                        throw new Exception("Prikaz mora zadržati krov i obje etaže na slici, a vrijeme i opremu izvan kuće bez preklapanja.");
+                    var upperReadings = Descendants<TextBlock>(Element("house-floor-kat")).Select(text => text.Text).ToArray();
+                    var lowerReadings = Descendants<TextBlock>(Element("house-floor-prizemlje")).Select(text => text.Text).ToArray();
+                    if (!upperReadings.Contains("22,3 °C") || !upperReadings.Contains("35,8 °C") ||
+                        !lowerReadings.Contains("21,7 °C") || !lowerReadings.Contains("34,5 °C"))
+                        throw new Exception("Gornji i donji kat moraju zadržati vlastita mjerenja.");
+                }
+                VerifyIllustratedLayout();
+                var originalWidth = Width;
+                Width = MinWidth;
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                UpdateLayout();
+                VerifyIllustratedLayout();
+                Width = originalWidth;
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                UpdateLayout();
+                var buffers = Descendants<Border>(this).Where(node => AutomationProperties.GetAutomationId(node).StartsWith("buffer-", StringComparison.Ordinal))
+                    .ToDictionary(AutomationProperties.GetAutomationId, node => Descendants<TextBlock>(node).Select(text => text.Text).ToArray());
+                if (buffers.Count != 2 || !buffers["buffer-2000"].Contains("62,3 °C") || !buffers["buffer-2000"].Contains("48,7 °C") ||
+                    !buffers["buffer-2000"].Contains("36,4 °C") || buffers["buffer-1000"].Count(value => value == "—") != 3)
+                    throw new Exception("Presjek mora povezati tri očitanja pufera 2000 L i ostaviti prazne senzore pufera 1000 L.");
+                Button ZoomControl(string key) => Descendants<Button>(this).Single(button => AutomationProperties.GetAutomationId(button) == key);
+                var zoomIn = ZoomControl("house-zoom-in");
+                for (var i = 0; i < 4; i++) zoomIn.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                var zoomViewport = Descendants<ScrollViewer>(this).Single(view => AutomationProperties.GetName(view) == "Zumirani presjek kuće");
+                if (houseZoom.Scale != 2 || zoomIn.IsEnabled || zoomViewport.Visibility != Visibility.Visible || zoomViewport.ScrollableWidth <= 0)
+                    throw new Exception("Zum presjeka mora imati ograničenu skalu i vodoravno pomicanje.");
+                Render();
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                if (houseZoom.Scale != 2 || ZoomControl("house-zoom-reset").Content as string != "200%")
+                    throw new Exception("Osvježavanje mora sačuvati zum presjeka kuće.");
+                ZoomControl("house-zoom-reset").RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                UpdateLayout();
+                if (houseZoom.Scale != 1 || Descendants<ScrollViewer>(this).Any(view => AutomationProperties.GetName(view) == "Zumirani presjek kuće" && view.IsVisible))
+                    throw new Exception("Vraćanje zuma mora prikazati običan presjek na početnoj stranici.");
+            }
             if (id == "heating" && sub == "schedule")
             {
                 var sliders = Descendants<Slider>(this).ToArray();
@@ -443,7 +652,7 @@ public sealed class MainWindow : Window
             var bitmap = new RenderTargetBitmap((int)ActualWidth, (int)ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(this);
             using var output = File.Create(Path.Combine(directory, file + ".png")); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); encoder.Save(output);
         }
-        File.WriteAllText(Path.Combine(directory, "native-smoke.txt"), "TERMODOM_WINDOWS_NATIVE_SMOKE_OK\nWPF native controls; 24 sliders; 5 numeric settings + climate; 10 chart sources; nine native screens including disabled synthetic camera metadata bindings; fixture reads only; no WebView.\n");
+        File.WriteAllText(Path.Combine(directory, "native-smoke.txt"), "TERMODOM_WINDOWS_NATIVE_SMOKE_OK\nOriginal illustrated house; roof and correctly mapped floor overlays, exterior and boiler placements at normal and minimum widths; confirmed 2,000 L puffer levels; bounded zoom, scrollable magnified view, refresh preservation and reset. WPF 24 sliders; 5 numeric settings + climate; 10 chart sources; nine native screens including disabled synthetic camera metadata bindings; fixture reads only; no WebView.\n");
     }
     static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
     {
