@@ -41,6 +41,7 @@ public final class MainActivity extends Activity {
     private JSONObject status,settings,settingsDraft,solarData;
     private HouseTelemetry.Packet houseData, housePumps;
     private final HouseSectionView.Viewport houseViewport=new HouseSectionView.Viewport();
+    private Bitmap houseArtwork;
     private boolean houseLoading, pumpsLoading, weatherLoading, houseDetails, weatherDetails;
     private String houseError="", pumpsError="", weatherError="";
     private Instant lastWeatherAttempt=Instant.EPOCH;
@@ -123,24 +124,18 @@ public final class MainActivity extends Activity {
     private void syncWarning(){JSONObject s=status==null?null:status.optJSONObject("sync");if(s==null)return;String a=s.optString("kat",""),b=s.optString("prizemlje","");if((a+" "+b).toUpperCase(Locale.ROOT).contains("NO SYNC"))banner("Izvor javlja: "+a+" · "+b+". Dostupna web-stranica ne potvrđuje sinkronizaciju regulatora.");}
     private String pageName(){int index=Arrays.asList(IDS).indexOf(page);if(index>=0)return NAMES[index];switch(page){case "solar":return "Solarna elektrana";case "camera":return "Kamera";default:return "U pripremi";}}
     private void overview(){
-        title("Moj pametni dom","Presjek kuće","Dvije etaže, solarni kolektori i kotlovnica.");
+        add(content,text("Presjek kuće",28,INK,true));
+        gap(content,10);
         Instant now=Instant.now();
         HouseTelemetry telemetry=new HouseTelemetry(houseData,housePumps,DevelopmentMode.enabled());
-        weatherCard(telemetry,now);
-        HouseSectionView house=new HouseSectionView(this,telemetry,houseViewport);
+        if(houseArtwork==null) houseArtwork=BitmapFactory.decodeResource(getResources(),R.drawable.m_house_cutaway);
+        HouseSectionView house=new HouseSectionView(this,telemetry,houseViewport,houseArtwork);
         houseZoomControls(house);
         add(content,house);
-        gap(content,12);
-        LinearLayout climate=card();
-        add(climate,text("Cirkulacijske pumpe",17,INK,true));
-        for(int i=0;i<HouseTelemetry.PUMP_NAMES.length;i++){
-            HouseTelemetry.Pump pump=telemetry.pumpState(i,now);
-            boolean fresh=telemetry.pumpReadings[i].age(now)==HouseTelemetry.Age.FRESH;
-            String label=pump==HouseTelemetry.Pump.UNKNOWN?"? Nepoznato":(fresh?"↻ ":"Zadnje: ")+(pump==HouseTelemetry.Pump.ON?"Radi":"Miruje");
-            metricAccent(climate,HouseTelemetry.PUMP_NAMES[i],label,!fresh?MUTED:pump==HouseTelemetry.Pump.ON?0xff76ddac:pump==HouseTelemetry.Pump.OFF?0xffff9d9b:MUTED);
-            String age=telemetry.pumpReadings[i].tag(now);
-            if(!age.isEmpty()&&Double.isFinite(telemetry.pumpReadings[i].value))add(climate,text(age,11,MUTED,false));
-        }
+        gap(content,14);
+        houseTimestamps(telemetry,now);
+        weatherCard(telemetry,now);
+        LinearLayout climate=boilerRoom(telemetry,now);
         if(!houseError.isEmpty()||!pumpsError.isEmpty()){
             gap(climate,10);add(climate,text((houseData==null&&housePumps==null?"Očitanja trenutačno nisu dostupna.":"Osvježavanje nije uspjelo. Prikazana su posljednja dostupna očitanja.")+
                     (!houseError.isEmpty()&&!pumpsError.isEmpty()?"":!houseError.isEmpty()?" · Temperature":" · Pumpe"),12,AMBER,false));
@@ -157,14 +152,96 @@ public final class MainActivity extends Activity {
     private void houseZoomControls(HouseSectionView house){
         LinearLayout controls=row();
         TextView hint=text("Zumiranje dvama prstima",11,MUTED,false);hint.setPadding(0,0,dp(5),0);controls.addView(hint,weight());
-        zoomButton(controls,"−","Smanji prikaz kuće","house-zoom-out",()->house.zoomBy(1f/1.35f));
-        zoomButton(controls,"100 %","Vrati prikaz kuće na 100 posto","house-zoom-reset",house::resetZoom);
-        zoomButton(controls,"+","Povećaj prikaz kuće","house-zoom-in",()->house.zoomBy(1.35f));
+        Button out=zoomButton(controls,"−","Smanji prikaz kuće","house-zoom-out",()->house.zoomBy(1f/1.25f));
+        Button reset=zoomButton(controls,"100 %","Vrati prikaz kuće na 100 posto","house-zoom-reset",house::resetZoom);
+        Button in=zoomButton(controls,"+","Povećaj prikaz kuće","house-zoom-in",()->house.zoomBy(1.25f));
+        Runnable update=()->{
+            float zoom=house.zoomFactor();
+            reset.setText(Math.round(zoom*100)+" %");
+            out.setEnabled(zoom>1f);
+            in.setEnabled(zoom<3f);
+        };
+        house.onZoomChanged(update);
+        update.run();
         add(content,controls);gap(content,9);
     }
-    private void zoomButton(LinearLayout row,String label,String description,String tag,Runnable click){
+    private Button zoomButton(LinearLayout row,String label,String description,String tag,Runnable click){
         Button view=button(label,false,click);view.setTag(tag);view.setContentDescription(description);
-        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(dp(label.length()>1?64:48),dp(48));params.leftMargin=dp(5);row.addView(view,params);
+        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(dp(label.length()>1?70:48),dp(48));params.leftMargin=dp(5);row.addView(view,params);
+        return view;
+    }
+    private LinearLayout boilerRoom(HouseTelemetry telemetry,Instant now) {
+        LinearLayout boilerRoom=card();
+        boilerRoom.setTag("house-boiler-room");
+        add(boilerRoom,text("Kotlovnica",20,INK,true));
+        gap(boilerRoom,9);
+        add(boilerRoom,HouseSectionView.boilerRoomIllustration(this,houseArtwork));
+        gap(boilerRoom,10);
+        equipment(boilerRoom,"Kotao",telemetry.boiler,now);
+        gap(boilerRoom,8);
+        bufferTanks(boilerRoom,telemetry,now);
+        gap(boilerRoom,8);
+        equipment(boilerRoom,"Sanitarna voda",telemetry.sanitary,now);
+        gap(boilerRoom,8);
+        equipment(boilerRoom,"Toplinska pumpa",telemetry.heatPump,now);
+        gap(boilerRoom,16);
+        add(boilerRoom,text("Cirkulacijske pumpe",17,INK,true));
+        gap(boilerRoom,6);
+        for(int i=0;i<HouseTelemetry.PUMP_NAMES.length;i++) addPumpStatus(boilerRoom,telemetry,i,now);
+        return boilerRoom;
+    }
+    private void equipment(LinearLayout parent,String name,HouseTelemetry.Reading value,Instant now) {
+        LinearLayout card=deviceCard(name);
+        reading(card,"Temperatura",value,now);
+        add(parent,card);
+    }
+    private LinearLayout deviceCard(String name) {
+        LinearLayout card=column();
+        card.setBackground(bg(0xff20323c,12));
+        card.setPadding(dp(12),dp(10),dp(12),dp(11));
+        add(card,text(name,15,INK,true));
+        return card;
+    }
+    private void bufferTanks(LinearLayout parent,HouseTelemetry telemetry,Instant now) {
+        LinearLayout large=bufferCard("Pufer 2.000 L",telemetry.buffer,now);
+        LinearLayout small=bufferCard("Pufer 1.000 L",telemetry.bufferTwo,now);
+        if(getResources().getConfiguration().screenWidthDp<390 ||
+                getResources().getConfiguration().fontScale>1.15f) {
+            add(parent,large);
+            gap(parent,8);
+            add(parent,small);
+            return;
+        }
+        LinearLayout tanks=row();
+        tanks.setGravity(Gravity.TOP);
+        tanks.addView(large,new LinearLayout.LayoutParams(0,-1,1));
+        LinearLayout.LayoutParams second=new LinearLayout.LayoutParams(0,-1,1);
+        second.leftMargin=dp(8);
+        tanks.addView(small,second);
+        add(parent,tanks);
+    }
+    private LinearLayout bufferCard(String name,HouseTelemetry.Reading[] values,Instant now) {
+        LinearLayout card=deviceCard(name);
+        reading(card,"Vrh",values[0],now);
+        reading(card,"Sredina",values[1],now);
+        reading(card,"Dno",values[2],now);
+        return card;
+    }
+    private void addPumpStatus(LinearLayout parent,HouseTelemetry telemetry,int index,Instant now) {
+        HouseTelemetry.Reading reading=telemetry.pumpReadings[index];
+        HouseTelemetry.Pump mode=telemetry.pumpState(index,now);
+        boolean fresh=reading.age(now)==HouseTelemetry.Age.FRESH;
+        String label=mode==HouseTelemetry.Pump.UNKNOWN?"Nepoznato":(fresh?"":"Zadnje: ")+(mode==HouseTelemetry.Pump.ON?"Radi":"Miruje");
+        int color=!fresh?MUTED:mode==HouseTelemetry.Pump.ON?0xff76ddac:0xffff9d9b;
+        LinearLayout line=row();
+        line.setMinimumHeight(dp(38));
+        line.addView(new CirculationPumpView(this,telemetry,index),new LinearLayout.LayoutParams(dp(32),dp(32)));
+        TextView name=text(HouseTelemetry.PUMP_NAMES[index],13,INK,true);
+        name.setPadding(dp(8),0,dp(8),0);
+        line.addView(name,weight());
+        line.addView(text(label,12,color,true));
+        add(parent,line);
+        if(reading.age(now)==HouseTelemetry.Age.OLD) add(parent,text(reading.tag(now),11,MUTED,false));
     }
     private void metricAccent(LinearLayout parent,String label,String value,int color){
         LinearLayout r=row();r.addView(text(label,12,MUTED,false),weight());TextView valueView=text(value,14,color,true);valueView.setGravity(Gravity.END);r.addView(valueView);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(8);parent.addView(r,lp);
@@ -173,14 +250,33 @@ public final class MainActivity extends Activity {
         metricAccent(parent,label,HouseTelemetry.degrees(value.value),HouseTelemetry.valueColor(value,INK,now));
         String note=value.tag(now);if(!note.isEmpty()&&Double.isFinite(value.value))add(parent,text(note,11,MUTED,false));
     }
+    private void houseTimestamps(HouseTelemetry telemetry,Instant now) {
+        String[] names={"Solarni kolektori","1. kat · sobna","1. kat · zadana","1. kat · polaz",
+                "Prizemlje · sobna","Prizemlje · zadana","Prizemlje · polaz"};
+        HouseTelemetry.Reading[] readings={telemetry.collector,telemetry.kat,telemetry.katTarget,telemetry.katSupply,
+                telemetry.prizemlje,telemetry.prizemljeTarget,telemetry.prizemljeSupply};
+        LinearLayout timestamps=null;
+        for(int i=0;i<readings.length;i++){
+            if(readings[i].age(now)!=HouseTelemetry.Age.OLD) continue;
+            if(timestamps==null){
+                timestamps=card();
+                timestamps.setTag("house-old-readings");
+                add(timestamps,text("Zadnja očitanja",14,INK,true));
+            }
+            gap(timestamps,5);
+            add(timestamps,text(names[i]+" · "+readings[i].tag(now),11,MUTED,false));
+        }
+    }
     private void houseReadings(HouseTelemetry t,Instant now){
         String[] names={"Kat · izmjereno","Kat · zadano","Prizemlje · izmjereno","Prizemlje · zadano","Peć","Sanitarna voda","Solarni kolektori","Pufer 2.000 L · vrh","Pufer 2.000 L · sredina","Pufer 2.000 L · dno","Pufer 1.000 L · vrh","Pufer 1.000 L · sredina","Pufer 1.000 L · dno","Dizalica topline","Polaz · kat","Polaz · prizemlje","Polaz · prizemlje 2","Dodatni senzor 1"};
         HouseTelemetry.Reading[] values={t.kat,t.katTarget,t.prizemlje,t.prizemljeTarget,t.boiler,t.sanitary,t.collector,t.buffer[0],t.buffer[1],t.buffer[2],t.bufferTwo[0],t.bufferTwo[1],t.bufferTwo[2],t.heatPump,t.katSupply,t.prizemljeSupply,t.extraSupply,t.extraSensor};
-        boolean anyOld=false;for(HouseTelemetry.Reading reading:values)if(reading.age(now)==HouseTelemetry.Age.OLD){anyOld=true;break;}
+        int firstExtra=values.length-2;
+        boolean anyExtraOld=t.extraSupply.age(now)==HouseTelemetry.Age.OLD||t.extraSensor.age(now)==HouseTelemetry.Age.OLD;
         LinearLayout readings=card();
         add(readings,text("Temperaturna očitanja",17,INK,true));
-        if(houseDetails||anyOld){
-            for(int i=0;i<names.length;i++)if(houseDetails||values[i].age(now)==HouseTelemetry.Age.OLD)reading(readings,names[i],values[i],now);
+        if(houseDetails||anyExtraOld){
+            for(int i=houseDetails?0:firstExtra;i<names.length;i++)
+                if(houseDetails||values[i].age(now)==HouseTelemetry.Age.OLD)reading(readings,names[i],values[i],now);
             gap(readings,10);
         }
         add(readings,text(DevelopmentMode.enabled()?"DEMO · postojeća očitanja i ilustrativni uređaji simulirani su za razvoj.":"Pufer 1.000 L: tri mjesta rezervirana za buduće senzore. Očitanje dizalice topline nije dostupno.",12,MUTED,false));

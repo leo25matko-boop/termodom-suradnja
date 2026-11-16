@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 
-/** Converts the original, timestamped read API into a schematic snapshot. */
+/** Converts timestamped heating readings into a snapshot for the home screen. */
 final class HouseTelemetry {
     static final int MUTED = 0xffa1b6c1;
     private static final Locale HR = Locale.forLanguageTag("hr-HR");
@@ -149,20 +149,15 @@ final class HouseTelemetry {
         return Double.isFinite(value) ? String.format(HR, "%.1f °C", value) : "—";
     }
 
-    static final String[] PUMP_NAMES = {"Kat", "Prizemlje", "Peć", "Sanitarna voda", "Solarni kolektori"};
+    static final String[] PUMP_NAMES = {"1. kat", "Prizemlje", "Kotao", "Sanitarna voda", "Solarni kolektori"};
 
     String description() {
         Instant now = Instant.now();
-        return "Presjek kuće. Kat: " + spoken(kat, now) + ", zadano " + spoken(katTarget, now)
+        return "Presjek kuće. 1. kat: " + spoken(kat, now) + ", zadano " + spoken(katTarget, now)
+                + ", polaz " + spoken(katSupply, now)
                 + ". Prizemlje: " + spoken(prizemlje, now) + ", zadano " + spoken(prizemljeTarget, now)
-                + ". Krovni solarni kolektori: " + spoken(collector, now)
-                + ". Kotlovnica. Pufer 2.000 L: " + spokenBuffer(buffer, now)
-                + ". Pufer 1.000 L: " + spokenBuffer(bufferTwo, now) + ". Peć: " + spoken(boiler, now)
-                + ". Sanitarna voda: " + spoken(sanitary, now) + ". Dizalica topline: " + spoken(heatPump, now) + ".";
-    }
-
-    private static String spokenBuffer(Reading[] levels, Instant now) {
-        return "vrh " + spoken(levels[0], now) + ", sredina " + spoken(levels[1], now) + ", dno " + spoken(levels[2], now);
+                + ", polaz " + spoken(prizemljeSupply, now)
+                + ". Krovni solarni kolektori: " + spoken(collector, now) + ".";
     }
 
     private static String spoken(Reading reading, Instant now) {
