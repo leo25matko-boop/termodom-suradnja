@@ -93,16 +93,16 @@ jobs:
           if (-not (Test-Path -LiteralPath $compiler)) { throw 'The runner must have the official Inno Setup compiler installed.' }
           & $compiler "/DSourceDir=$PWD/windows/publish" "/DOutputPath=$PWD/windows/installer-output" windows/installer.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer compile failed.' }
-          $installer = 'windows/installer-output/TermoDom-Setup-2.0.0-x64.exe'
+          $installer = 'windows/installer-output/TermoDom-Setup-2.1.0-x64.exe'
           if ((Get-Item -LiteralPath $installer).Length -lt 1000000) { throw 'Installer is incomplete.' }
           $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  TermoDom-Setup-2.0.0-x64.exe" | Set-Content -LiteralPath windows/installer-output/TermoDom-Windows-2.0.0-SHA256.txt -Encoding ascii
-          Compress-Archive -Path windows/publish/* -DestinationPath windows/installer-output/TermoDom-Windows-2.0.0.zip -CompressionLevel Optimal
+          "$hash  TermoDom-Setup-2.1.0-x64.exe" | Set-Content -LiteralPath windows/installer-output/TermoDom-Windows-2.1.0-SHA256.txt -Encoding ascii
+          Compress-Archive -Path windows/publish/* -DestinationPath windows/installer-output/TermoDom-Windows-2.1.0.zip -CompressionLevel Optimal
 
       - name: Upload Windows installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: termodom-windows-native-2.0.0
+          name: termodom-windows-native-2.1.0
           overwrite: true
           path: windows/installer-output/*
           if-no-files-found: error

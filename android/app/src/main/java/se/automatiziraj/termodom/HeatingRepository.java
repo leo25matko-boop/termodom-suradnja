@@ -34,9 +34,10 @@ import okhttp3.ResponseBody;
 public final class HeatingRepository {
     public static final String SOURCE = "https://automatiziraj.se/centralno/php/novo.php";
     private static final URI BASE = URI.create("https://automatiziraj.se/centralno/php/");
+    private static final String TELEMETRY_PATH = "/centralno/php/m.php";
     private static final String LOGOUT_PATH = "/centralno/scr/logout.scr.php";
     private static final int RESPONSE_LIMIT = 5_000_000;
-    private static final Set<String> READ_PATHS = paths("novo.php", "kat.php", "prizemlje.php", "podesavanje.php",
+    private static final Set<String> READ_PATHS = paths("novo.php", "kat.php", "prizemlje.php", "podesavanje.php", "m.php",
             "graf_kat_temp.php", "graf_prizemlje_temp.php", "graf_puffer_temp.php", "graf_sanitarna_temp.php", "graf_pec_temp2.php",
             "grafVANJ.php", "graf_tuya.php", "graf_napon2.php", "grafP1.php", "grafp1-6.php");
     private static final Set<String> WRITE_PATHS = paths("dodajPODESAVANJA.php", "zapisi_postavke.php");
@@ -90,7 +91,8 @@ public final class HeatingRepository {
             String rawPath = uri.getRawPath();
             if (!"https".equalsIgnoreCase(uri.getScheme()) || !"automatiziraj.se".equalsIgnoreCase(uri.getHost())
                     || (uri.getPort() != -1 && uri.getPort() != 443) || uri.getRawUserInfo() != null || uri.getRawFragment() != null
-                    || (!READ_PATHS.contains(rawPath) && !WRITE_PATHS.contains(rawPath) && !LOGOUT_PATH.equals(rawPath))) {
+                    || (!READ_PATHS.contains(rawPath) && !WRITE_PATHS.contains(rawPath) && !LOGOUT_PATH.equals(rawPath))
+                    || TELEMETRY_PATH.equals(rawPath) && !Arrays.asList("action=data", "action=pumps").contains(uri.getRawQuery())) {
                 throw new IllegalArgumentException();
             }
             return uri;
@@ -196,7 +198,8 @@ public final class HeatingRepository {
         }
         for (int hop = 0; hop <= 4; hop++) {
             Map<String, String> headers = new LinkedHashMap<>();
-            headers.put("Accept", "text/html");
+            headers.put("Accept", TELEMETRY_PATH.equals(uri.getRawPath()) ? "application/json" : "text/html");
+            if (TELEMETRY_PATH.equals(uri.getRawPath())) headers.put("Cache-Control", "no-cache");
             headers.put("User-Agent", "TermoDom/1.1 (native Android heating controller)");
             String cookie = cookieHeader(uri);
             if (!cookie.isEmpty()) headers.put("Cookie", cookie);
@@ -234,6 +237,17 @@ public final class HeatingRepository {
     }
 
     private String read(String path) throws Exception { return request(path, null, false, false); }
+    HouseTelemetry.Packet telemetry(boolean pumps) throws Exception {
+        JSONObject packet = new JSONObject(read("m.php?action=" + (pumps ? "pumps" : "data")));
+        if (!packet.optBoolean("success") || HouseTelemetry.parseTime(packet.optString("server_time")) == null
+                || packet.optJSONArray(pumps ? "pumps" : "latest") == null) {
+            throw new AppException("Izvor ne vraća valjana očitanja presjeka kuće.");
+        }
+        // History is part of the public response, but the cutaway uses current values only.
+        packet.remove("history");
+        packet.remove("room_history");
+        return new HouseTelemetry.Packet(packet, Instant.now());
+    }
     public JSONObject status() throws Exception {
         return HeatingParser.parseStatus(read("novo.php")).put("source", SOURCE).put("fetchedAt", Instant.now().toString());
     }

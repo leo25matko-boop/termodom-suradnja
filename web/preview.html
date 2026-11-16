@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="hr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101c24">
+    <title>TermoDom · Presjek kuće</title>
+    <link rel="stylesheet" href="./m-house.css">
+    <style>body { margin: 0; background: #101c24; }</style>
+</head>
+<body data-house-demo>
+    <div data-house-mount></div>
+    <script type="module">
+        import './m-house.js';
+        const stamp = minutesAgo => {
+            const sample = new Date(Date.now() - minutesAgo * 60_000);
+            const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Europe/Zagreb', hourCycle: 'h23', year: 'numeric', month: '2-digit',
+                day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+            }).formatToParts(sample).map(({type, value}) => [type, value]));
+            return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+        };
+        const server_time = stamp(0);
+        const announce = (kind, fields) => document.dispatchEvent(new CustomEvent('termodom:' + kind, {
+            detail: { payload: { success: true, server_time, ...fields }, fetchedAt: Date.now() }
+        }));
+        announce('measurements', {
+            latest: [
+                ['house/puffer/top', 62.5, 1], ['house/puffer/midd', 49.8, 4], ['house/puffer/bottom', 36.7, 13],
+                ['house/kotal/temp', 70.8, 1], ['house/dhw/temp', 50.2, 1], ['house/solar/temp', 29.7, 1],
+                ['house/outdoor/temp', 7.6, 1], ['house/polaz_priz/temp', 33.4, 1], ['house/polaz_kat/temp', 34.9, 4],
+                ['house/polaz_priz2/temp', 34.2, 1], ['house/sensor1/temp', 14.8, 1]
+            ].map(([topic, temperature, age]) => ({topic, temperature, received_at: stamp(age)})),
+            room_latest: [
+                {room: 'kat', temperature: 21.3, setpoint: 22, received_at: stamp(1)},
+                {room: 'prizemlje', temperature: 22.4, setpoint: 22.5, received_at: stamp(1)}
+            ],
+            history: [], room_history: []
+        });
+        announce('pumps', {pumps: [
+            ['kotao', 1, 1], ['prizemlje', 1, 1], ['kat', 0, 1], ['sanitarna', 0, 12], ['solar', 0, 2]
+        ].map(([pump, state, age]) => ({pump, state, updated_at: stamp(age)}))});
+    </script>
+</body>
+</html>

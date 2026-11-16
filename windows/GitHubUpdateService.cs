@@ -12,7 +12,7 @@ public record GitHubPackage(Version Version, string Tag, Uri DownloadUrl, long S
 /// <summary>Downloads a verified public release ZIP; never executes, installs or extracts it.</summary>
 public sealed class GitHubUpdateService
 {
-    public static readonly Version CurrentVersion = new(2, 0, 0);
+    public static readonly Version CurrentVersion = Version.Parse(typeof(GitHubUpdateService).Assembly.GetName().Version!.ToString(3));
     const long MaximumSize = 500_000_000;
     public const string ReleaseApi = "https://api.github.com/repos/leo25matko-boop/termo/releases/latest";
     public string DownloadDirectory { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TermoDom", "downloads");
@@ -105,7 +105,7 @@ public sealed class GitHubUpdateService
             while ((read = await metadataStream.ReadAsync(buffer, metadataTimeout.Token)) != 0)
             { if (metadataOutput.Length + read > 2_000_000) throw new ControllerException("GitHub odgovor je prevelik."); metadataOutput.Write(buffer, 0, read); }
             var package = SelectPackage(System.Text.Encoding.UTF8.GetString(metadataOutput.ToArray()), CurrentVersion);
-            if (package == null) { SetStatus("Instalirana je aktualna verzija 2.0.0."); return; }
+            if (package == null) { SetStatus($"Instalirana je aktualna verzija {CurrentVersion.ToString(3)}."); return; }
             var folder = Path.Combine(DownloadDirectory, package.Version.ToString(3)); Directory.CreateDirectory(folder);
             var final = Path.Combine(folder, "TermoDom-Windows.zip"); var partial = final + ".part";
             if (File.Exists(final))
